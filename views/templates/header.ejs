@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>
+    <%= title || "COMP4921 Project 2" %>
+  </title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body class="d-flex flex-column min-vh-100">
+  <script src="https://cdn.jsdelivr.net/npm/cloudinary-jquery@2.11.3/cloudinary-jquery.min.js"></script>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark position-relative">
+    <div class="container">
+      <a class="navbar-brand" href="/">Project2</a>
+      <a class="navbar-brand" href="/threads">Threads</a>
+      <div class="d-flex align-items-center">
+        <% if (loggedIn) { %>
+          <span class="me-2 text-white">
+            Welcome, <strong class="text-warning">
+              <%= username %>!
+            </strong>
+          </span>
+          <a href="javascript:void(0)" id="notifBtn" class="btn btn-outline-light btn-sm position-relative me-2">
+            <i class="fa-solid fa-bell"></i> Notifications
+            <span id="notifBadge"
+              class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>
+          </a>
+          <div id="notifPanel" class="card shadow d-none"
+            style="position:fixed; top:56px; right:12px; width: 380px; max-height: 70vh; z-index: 2000;">
+            <div class="card-header d-flex align-items-center gap-3 position-sticky top-0 bg-white" style="z-index:1;">
+              <strong class="me-auto">Notifications</strong>
+              <button id="notifMarkAll" class="btn btn-sm btn-outline-primary">Mark all read</button>
+              <button id="notifClearRead" class="btn btn-sm btn-outline-warning">Clear read</button>
+              <button id="notifClearAll" class="btn btn-sm btn-outline-danger">Clear all</button>
+              </button>
+            </div>
+            <div id="notifList" class="list-group list-group-flush"
+              style="overflow-y:auto; max-height: calc(70vh - 56px);">
+              <div class="list-group-item text-muted small">Loading…</div>
+            </div>
+          </div>
+
+          <a href="/profile" class="btn btn-outline-light btn-sm me-2">
+            <i class="fa-solid fa-user"></i> Profile
+          </a>
+          <a href="/logout" class="btn btn-outline-danger btn-sm">Logout</a>
+          <% } else { %>
+            <a href="/login" class="btn btn-outline-primary btn-sm me-2">Login</a>
+            <a href="/signup" class="btn btn-primary btn-sm">Sign Up</a>
+            <% } %>
+      </div>
+    </div>
+  </nav>
