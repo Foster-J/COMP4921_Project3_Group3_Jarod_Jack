@@ -83,7 +83,34 @@ async function ensureUsersTable() {
   }
 }
 
+// Ensure calendar_events table exists
+async function ensureCalendarEventsTable() {
+  const createSQL = `
+    CREATE TABLE IF NOT EXISTS calendar_events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      description TEXT,
+      start_datetime DATETIME NOT NULL,
+      end_datetime DATETIME NOT NULL,
+      color VARCHAR(7) DEFAULT '#3b82f6',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_user_id (user_id),
+      INDEX idx_start_datetime (start_datetime)
+    );
+  `;
+  try {
+    await database.query(createSQL);
+    console.log("Calendar events table is ready!");
+  } catch (err) {
+    console.error("Error ensuring calendar_events table:", err);
+  }
+}
+
 ensureUsersTable();
+ensureCalendarEventsTable();
 
 function ensureLoggedIn(req, res, next) {
   if (!req.session.authenticated) return res.redirect("/login");
