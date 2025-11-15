@@ -141,6 +141,119 @@ app.get("/", async (req, res) => {
   }
 });
 
+// Calendar page
+app.get("/calendar", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const [events] = await database.query(
+      "SELECT * FROM calendar_events WHERE user_id = ? ORDER BY start_datetime ASC",
+      [userId]
+    );
+    res.render("calendar", { events });
+  } catch (err) {
+    console.error("Error loading calendar:", err);
+    res.redirect("/");
+  }
+});
+
+// Get events as JSON (for calendar display)
+app.get("/api/events", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const [events] = await database.query(
+      "SELECT * FROM calendar_events WHERE user_id = ? ORDER BY start_datetime ASC",
+      [userId]
+    );
+    res.json(events);
+  } catch (err) {
+    console.error("Error fetching events:", err);
+    res.status(500).json({ error: "Failed to fetch events" });
+  }
+});
+
+// Create new event
+app.post("/api/events", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const { title, description, start_datetime, end_datetime, color } = req.body;
+
+    if (!title || !start_datetime || !end_datetime) {
+      return res.status(400).json({ error: "Title, start time, and end time are required" });
+    }
+
+    const [result] = await database.query(
+      "INSERT INTO calendar_events (user_id, title, description, start_datetime, end_datetime, color) VALUES (?, ?, ?, ?, ?, ?)",
+      [userId, title, description || null, start_datetime, end_datetime, color || '#3b82f6']
+    );
+
+    const [newEvent] = await database.query(
+      "SELECT * FROM calendar_events WHERE id = ?",
+      [result.insertId]
+    );
+
+    res.json(newEvent[0]);
+  } catch (err) {
+    console.error("Error creating event:", err);
+    res.status(500).json({ error: "Failed to create event" });
+  }
+});
+
+// Update event
+app.put("/api/events/:id", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const eventId = req.params.id;
+    const { title, description, start_datetime, end_datetime, color } = req.body;
+
+    // Check if event belongs to user
+    const [existing] = await database.query(
+      "SELECT id FROM calendar_events WHERE id = ? AND user_id = ?",
+      [eventId, userId]
+    );
+
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+
+    await database.query(
+      "UPDATE calendar_events SET title = ?, description = ?, start_datetime = ?, end_datetime = ?, color = ? WHERE id = ? AND user_id = ?",
+      [title, description, start_datetime, end_datetime, color, eventId, userId]
+    );
+
+    const [updatedEvent] = await database.query(
+      "SELECT * FROM calendar_events WHERE id = ?",
+      [eventId]
+    );
+
+    res.json(updatedEvent[0]);
+  } catch (err) {
+    console.error("Error updating event:", err);
+    res.status(500).json({ error: "Failed to update event" });
+  }
+});
+
+// Delete event
+app.delete("/api/events/:id", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const eventId = req.params.id;
+
+    const [result] = await database.query(
+      "DELETE FROM calendar_events WHERE id = ? AND user_id = ?",
+      [eventId, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting event:", err);
+    res.status(500).json({ error: "Failed to delete event" });
+  }
+});
+
 // Profile page
 app.get("/profile", ensureLoggedIn, async (req, res) => {
   try {
