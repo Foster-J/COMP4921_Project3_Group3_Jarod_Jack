@@ -460,8 +460,17 @@ app.delete("/api/friends/:id", ensureLoggedIn, async (req, res) => {
 // Profile page
 app.get("/profile", ensureLoggedIn, async (req, res) => {
   try {
+    const userId = await getUserId(req);
+    const [rows] = await database.query("SELECT * FROM users WHERE id = ?", [userId]);
+    const user = rows[0];
+    
     if (!user) return res.redirect("/");
-    res.render("profile", { user });
+    
+    res.render("profile", { 
+      user: user, 
+      error: null, 
+      success: null 
+    });
   } catch (err) {
     console.error("Error loading profile:", err);
     res.redirect("/");
