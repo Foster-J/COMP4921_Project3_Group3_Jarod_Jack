@@ -8,7 +8,7 @@ const dbConfig = {
     password: process.env.MYSQL_PASSWORD,
     database: process.env.MYSQL_DATABASE,
     ssl: {
-        ca: process.env.MYSQL_SSL_CA,
+        ca: fs.readFileSync(process.env.MYSQL_SSL_CA),
         rejectUnauthorized: true,
     },
     multipleStatements: true,
