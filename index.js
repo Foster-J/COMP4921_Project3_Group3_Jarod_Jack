@@ -109,8 +109,35 @@ async function ensureCalendarEventsTable() {
   }
 }
 
+// Ensure friendships table exists
+async function ensureFriendshipsTable() {
+  const createSQL = `
+    CREATE TABLE IF NOT EXISTS friendships (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      requester_id INT NOT NULL,
+      addressee_id INT NOT NULL,
+      status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE KEY unique_friendship (requester_id, addressee_id),
+      INDEX idx_requester (requester_id),
+      INDEX idx_addressee (addressee_id),
+      INDEX idx_status (status)
+    );
+  `;
+  try {
+    await database.query(createSQL);
+    console.log("Friendships table is ready!");
+  } catch (err) {
+    console.error("Error ensuring friendships table:", err);
+  }
+}
+
 ensureUsersTable();
 ensureCalendarEventsTable();
+ensureFriendshipsTable();
 
 function ensureLoggedIn(req, res, next) {
   if (!req.session.authenticated) return res.redirect("/login");
@@ -132,17 +159,7 @@ async function getUserId(req) {
   return rows[0].id;
 }
 
-app.get("/", async (req, res) => {
-  try {
-    res.render("index", {
-    });
-  } catch (err) {
-    console.error("Error loading dashboard:", err);
-  }
-});
-
-// Calendar page
-app.get("/calendar", ensureLoggedIn, async (req, res) => {
+app.get("/", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
     const [events] = await database.query(
@@ -152,7 +169,7 @@ app.get("/calendar", ensureLoggedIn, async (req, res) => {
     res.render("calendar", { events });
   } catch (err) {
     console.error("Error loading calendar:", err);
-    res.redirect("/");
+    res.redirect("/login");
   }
 });
 
@@ -251,6 +268,192 @@ app.delete("/api/events/:id", ensureLoggedIn, async (req, res) => {
   } catch (err) {
     console.error("Error deleting event:", err);
     res.status(500).json({ error: "Failed to delete event" });
+  }
+});
+
+// Friends page
+app.get("/friends", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    
+    // Get accepted friends
+    const [friends] = await database.query(`
+      SELECT u.id, u.username, f.created_at
+      FROM users u
+      INNER JOIN friendships f ON (
+        (f.requester_id = ? AND f.addressee_id = u.id) OR
+        (f.addressee_id = ? AND f.requester_id = u.id)
+      )
+      WHERE f.status = 'accepted'
+      ORDER BY u.username ASC
+    `, [userId, userId]);
+
+    // Get pending incoming requests
+    const [pendingRequests] = await database.query(`
+      SELECT u.id, u.username, f.id as friendship_id, f.created_at
+      FROM users u
+      INNER JOIN friendships f ON f.requester_id = u.id
+      WHERE f.addressee_id = ? AND f.status = 'pending'
+      ORDER BY f.created_at DESC
+    `, [userId]);
+
+    // Get pending outgoing requests
+    const [sentRequests] = await database.query(`
+      SELECT u.id, u.username, f.id as friendship_id, f.created_at
+      FROM users u
+      INNER JOIN friendships f ON f.addressee_id = u.id
+      WHERE f.requester_id = ? AND f.status = 'pending'
+      ORDER BY f.created_at DESC
+    `, [userId]);
+
+    res.render("friends", { friends, pendingRequests, sentRequests });
+  } catch (err) {
+    console.error("Error loading friends:", err);
+    res.redirect("/");
+  }
+});
+
+// Search users for friend requests
+app.get("/api/users/search", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const query = req.query.q || '';
+    
+    if (query.length < 2) {
+      return res.json([]);
+    }
+
+    const [users] = await database.query(`
+      SELECT u.id, u.username
+      FROM users u
+      WHERE u.username LIKE ? AND u.id != ?
+      AND NOT EXISTS (
+        SELECT 1 FROM friendships f 
+        WHERE ((f.requester_id = ? AND f.addressee_id = u.id) OR 
+               (f.addressee_id = ? AND f.requester_id = u.id))
+        AND f.status IN ('pending', 'accepted')
+      )
+      LIMIT 10
+    `, [`%${query}%`, userId, userId, userId]);
+
+    res.json(users);
+  } catch (err) {
+    console.error("Error searching users:", err);
+    res.status(500).json({ error: "Failed to search users" });
+  }
+});
+
+// Send friend request
+app.post("/api/friends/request", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const { addressee_id } = req.body;
+
+    if (!addressee_id || addressee_id == userId) {
+      return res.status(400).json({ error: "Invalid user" });
+    }
+
+    // Check if friendship already exists
+    const [existing] = await database.query(`
+      SELECT id, status FROM friendships 
+      WHERE (requester_id = ? AND addressee_id = ?) 
+         OR (requester_id = ? AND addressee_id = ?)
+    `, [userId, addressee_id, addressee_id, userId]);
+
+    if (existing && existing.length > 0) {
+      return res.status(400).json({ error: "Friend request already exists" });
+    }
+
+    await database.query(
+      "INSERT INTO friendships (requester_id, addressee_id, status) VALUES (?, ?, 'pending')",
+      [userId, addressee_id]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error sending friend request:", err);
+    res.status(500).json({ error: "Failed to send friend request" });
+  }
+});
+
+// Accept friend request
+app.post("/api/friends/accept/:id", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const friendshipId = req.params.id;
+
+    // Verify this request is for the current user
+    const [friendship] = await database.query(
+      "SELECT id FROM friendships WHERE id = ? AND addressee_id = ? AND status = 'pending'",
+      [friendshipId, userId]
+    );
+
+    if (!friendship || friendship.length === 0) {
+      return res.status(404).json({ error: "Friend request not found" });
+    }
+
+    await database.query(
+      "UPDATE friendships SET status = 'accepted' WHERE id = ?",
+      [friendshipId]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error accepting friend request:", err);
+    res.status(500).json({ error: "Failed to accept friend request" });
+  }
+});
+
+// Reject friend request
+app.post("/api/friends/reject/:id", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const friendshipId = req.params.id;
+
+    // Verify this request is for the current user
+    const [friendship] = await database.query(
+      "SELECT id FROM friendships WHERE id = ? AND addressee_id = ? AND status = 'pending'",
+      [friendshipId, userId]
+    );
+
+    if (!friendship || friendship.length === 0) {
+      return res.status(404).json({ error: "Friend request not found" });
+    }
+
+    await database.query(
+      "DELETE FROM friendships WHERE id = ?",
+      [friendshipId]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error rejecting friend request:", err);
+    res.status(500).json({ error: "Failed to reject friend request" });
+  }
+});
+
+// Remove friend
+app.delete("/api/friends/:id", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const friendId = req.params.id;
+
+    const [result] = await database.query(
+      `DELETE FROM friendships 
+       WHERE ((requester_id = ? AND addressee_id = ?) OR 
+              (requester_id = ? AND addressee_id = ?))
+       AND status = 'accepted'`,
+      [userId, friendId, friendId, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Friendship not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error removing friend:", err);
+    res.status(500).json({ error: "Failed to remove friend" });
   }
 });
 
