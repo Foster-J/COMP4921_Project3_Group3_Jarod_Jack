@@ -1,265 +1,547 @@
-<%- include('templates/header', { title: 'Dashboard' , loggedIn, username }) %>
+<%- include('templates/header', { title: 'Calendar' , loggedIn, username }) %>
+  <style>
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 1px;
+      background: #dee2e6;
+      border: 1px solid #dee2e6;
+    }
+    .calendar-day-header {
+      background: #f8f9fa;
+      padding: 0.5rem;
+      text-align: center;
+      font-weight: 600;
+      border: 1px solid #dee2e6;
+    }
+    .calendar-day {
+      background: white;
+      min-height: 100px;
+      padding: 0.5rem;
+      position: relative;
+      border: 1px solid #dee2e6;
+    }
+    .calendar-day.other-month {
+      background: #f8f9fa;
+      color: #6c757d;
+    }
+    .calendar-day.today {
+      background: #e7f3ff;
+    }
+    .calendar-day-number {
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+    .calendar-event {
+      font-size: 0.75rem;
+      padding: 2px 4px;
+      margin-bottom: 2px;
+      border-radius: 3px;
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .week-view-container {
+      display: grid;
+      grid-template-columns: 80px repeat(7, 1fr);
+      gap: 1px;
+      background: #dee2e6;
+    }
+    .week-time-slot {
+      background: #f8f9fa;
+      padding: 0.5rem;
+      text-align: right;
+      border: 1px solid #dee2e6;
+      font-size: 0.875rem;
+    }
+    .week-day-column {
+      background: white;
+      min-height: 60px;
+      padding: 0.25rem;
+      border: 1px solid #dee2e6;
+      position: relative;
+    }
+    .week-event {
+      padding: 4px;
+      margin-bottom: 2px;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+  </style>
 
-    <!-- Main Container -->
-    <div class="container mt-4">
-        <!-- Header -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2 class="mb-0">My Calendar</h2>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#eventModal"
-                onclick="openCreateModal()">
-                <i class="bi bi-plus-circle"></i> New Event
-            </button>
+  <!-- Main Container -->
+  <div class="container-fluid mt-4 px-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div class="d-flex align-items-center gap-3">
+        <h2 class="mb-0">Calendar</h2>
+        <div class="btn-group" role="group">
+          <button class="btn btn-outline-secondary" id="prevBtn">
+            <i class="bi bi-chevron-left"></i>
+          </button>
+          <button class="btn btn-outline-secondary" id="todayBtn">Today</button>
+          <button class="btn btn-outline-secondary" id="nextBtn">
+            <i class="bi bi-chevron-right"></i>
+          </button>
         </div>
-
-        <!-- Events List -->
-        <div class="row" id="eventsContainer">
-            <div class="col-12">
-                <div class="alert alert-info" id="loadingAlert">
-                    <i class="bi bi-hourglass-split"></i> Loading events...
-                </div>
-            </div>
+        <h4 class="mb-0 text-muted" id="currentDateDisplay"></h4>
+      </div>
+      <div class="d-flex gap-2">
+        <div class="btn-group" role="group">
+          <input type="radio" class="btn-check" name="view" id="viewToday" value="today" checked>
+          <label class="btn btn-outline-primary" for="viewToday">Today</label>
+          
+          <input type="radio" class="btn-check" name="view" id="viewUpcoming" value="upcoming">
+          <label class="btn btn-outline-primary" for="viewUpcoming">Upcoming</label>
+          
+          <input type="radio" class="btn-check" name="view" id="viewWeek" value="week">
+          <label class="btn btn-outline-primary" for="viewWeek">Week</label>
+          
+          <input type="radio" class="btn-check" name="view" id="viewMonth" value="month">
+          <label class="btn btn-outline-primary" for="viewMonth">Month</label>
         </div>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#eventModal" onclick="openCreateModal()">
+          <i class="bi bi-plus-circle"></i> New Event
+        </button>
+      </div>
     </div>
 
-    <!-- Event Modal -->
-    <div class="modal fade" id="eventModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalTitle">Create Event</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="eventForm">
-                        <input type="hidden" id="eventId">
+    <!-- Calendar Views Container -->
+    <div id="calendarContainer"></div>
+  </div>
 
-                        <div class="mb-3">
-                            <label for="eventTitle" class="form-label">Title <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="eventTitle" required>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="eventDescription" class="form-label">Description</label>
-                            <textarea class="form-control" id="eventDescription" rows="3"></textarea>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="eventStart" class="form-label">Start Date & Time <span
-                                    class="text-danger">*</span></label>
-                            <input type="datetime-local" class="form-control" id="eventStart" required>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="eventEnd" class="form-label">End Date & Time <span
-                                    class="text-danger">*</span></label>
-                            <input type="datetime-local" class="form-control" id="eventEnd" required>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="eventColor" class="form-label">Color</label>
-                            <div class="d-flex gap-2 align-items-center">
-                                <input type="color" class="form-control form-control-color" id="eventColor"
-                                    value="#3b82f6" style="width: 60px;">
-                                <span class="text-muted">Choose an event color</span>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" onclick="saveEvent()">Save Event</button>
-                </div>
-            </div>
+  <!-- Event Modal -->
+  <div class="modal fade" id="eventModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTitle">Create Event</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
+        <div class="modal-body">
+          <form id="eventForm">
+            <input type="hidden" id="eventId">
+            
+            <div class="mb-3">
+              <label for="eventTitle" class="form-label">Title <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="eventTitle" required>
+            </div>
+
+            <div class="mb-3">
+              <label for="eventDescription" class="form-label">Description</label>
+              <textarea class="form-control" id="eventDescription" rows="3"></textarea>
+            </div>
+
+            <div class="mb-3">
+              <label for="eventStart" class="form-label">Start Date & Time <span class="text-danger">*</span></label>
+              <input type="datetime-local" class="form-control" id="eventStart" required>
+            </div>
+
+            <div class="mb-3">
+              <label for="eventEnd" class="form-label">End Date & Time <span class="text-danger">*</span></label>
+              <input type="datetime-local" class="form-control" id="eventEnd" required>
+            </div>
+
+            <div class="mb-3">
+              <label for="eventColor" class="form-label">Color</label>
+              <div class="d-flex gap-2 align-items-center">
+                <input type="color" class="form-control form-control-color" id="eventColor" value="#3b82f6" style="width: 60px;">
+                <span class="text-muted">Choose an event color</span>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-danger" id="deleteBtn" style="display: none;" onclick="deleteEvent()">Delete</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="saveEvent()">Save Event</button>
+        </div>
+      </div>
     </div>
+  </div>
 
-    <%- include('templates/footer') %>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let currentEventId = null;
+    let allEvents = [];
+    let currentView = 'today';
+    let currentDate = new Date();
+    const modal = new bootstrap.Modal(document.getElementById('eventModal'));
 
-        <script>
-            let currentEventId = null;
-            const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+    // Load events on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      loadEvents();
+      setupViewListeners();
+      setupNavigationListeners();
+    });
 
-            // Load events on page load
-            document.addEventListener('DOMContentLoaded', () => {
-                loadEvents();
-            });
+    function setupViewListeners() {
+      document.querySelectorAll('input[name="view"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+          currentView = e.target.value;
+          renderCalendar();
+        });
+      });
+    }
 
-            async function loadEvents() {
-                try {
-                    const response = await fetch('/api/events');
-                    const events = await response.json();
-                    displayEvents(events);
-                } catch (error) {
-                    console.error('Error loading events:', error);
-                    document.getElementById('eventsContainer').innerHTML = `
-          <div class="col-12">
-            <div class="alert alert-danger">Failed to load events. Please refresh the page.</div>
-          </div>
-        `;
-                }
-            }
+    function setupNavigationListeners() {
+      document.getElementById('todayBtn').addEventListener('click', () => {
+        currentDate = new Date();
+        renderCalendar();
+      });
 
-            function displayEvents(events) {
-                const container = document.getElementById('eventsContainer');
+      document.getElementById('prevBtn').addEventListener('click', () => {
+        if (currentView === 'month') {
+          currentDate.setMonth(currentDate.getMonth() - 1);
+        } else if (currentView === 'week') {
+          currentDate.setDate(currentDate.getDate() - 7);
+        } else if (currentView === 'today') {
+          currentDate.setDate(currentDate.getDate() - 1);
+        }
+        renderCalendar();
+      });
 
-                if (events.length === 0) {
-                    container.innerHTML = `
-          <div class="col-12">
-            <div class="alert alert-info">
-              <i class="bi bi-calendar-x"></i> No events yet. Create your first event!
-            </div>
-          </div>
-        `;
-                    return;
-                }
+      document.getElementById('nextBtn').addEventListener('click', () => {
+        if (currentView === 'month') {
+          currentDate.setMonth(currentDate.getMonth() + 1);
+        } else if (currentView === 'week') {
+          currentDate.setDate(currentDate.getDate() + 7);
+        } else if (currentView === 'today') {
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        renderCalendar();
+      });
+    }
 
-                container.innerHTML = events.map(event => {
-                    const startDate = new Date(event.start_datetime);
-                    const endDate = new Date(event.end_datetime);
-                    const startStr = startDate.toLocaleString();
-                    const endStr = endDate.toLocaleString();
+    async function loadEvents() {
+      try {
+        const response = await fetch('/api/events');
+        allEvents = await response.json();
+        renderCalendar();
+      } catch (error) {
+        console.error('Error loading events:', error);
+      }
+    }
 
-                    return `
-          <div class="col-md-6 col-lg-4 mb-3">
-            <div class="card h-100 border-start border-4" style="border-left-color: ${event.color} !important;">
-              <div class="card-body">
-                <h5 class="card-title">${escapeHtml(event.title)}</h5>
-                <p class="card-text text-muted small">
-                  <i class="bi bi-clock"></i> ${startStr}<br>
-                  <i class="bi bi-clock-fill"></i> ${endStr}
-                </p>
-                ${event.description ? `<p class="card-text">${escapeHtml(event.description)}</p>` : ''}
+    function renderCalendar() {
+      updateDateDisplay();
+      const container = document.getElementById('calendarContainer');
+      
+      switch(currentView) {
+        case 'today':
+          container.innerHTML = renderTodayView();
+          break;
+        case 'upcoming':
+          container.innerHTML = renderUpcomingView();
+          break;
+        case 'week':
+          container.innerHTML = renderWeekView();
+          break;
+        case 'month':
+          container.innerHTML = renderMonthView();
+          break;
+      }
+    }
+
+    function updateDateDisplay() {
+      const display = document.getElementById('currentDateDisplay');
+      if (currentView === 'month') {
+        display.textContent = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      } else if (currentView === 'week') {
+        const weekStart = getWeekStart(currentDate);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        display.textContent = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+      } else if (currentView === 'today') {
+        display.textContent = currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      } else {
+        display.textContent = '';
+      }
+    }
+
+    function renderTodayView() {
+      const today = new Date(currentDate);
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const todayEvents = allEvents.filter(event => {
+        const eventDate = new Date(event.start_datetime);
+        return eventDate >= today && eventDate < tomorrow;
+      });
+
+      if (todayEvents.length === 0) {
+        return '<div class="alert alert-info"><i class="bi bi-calendar-x"></i> No events today.</div>';
+      }
+
+      return `
+        <div class="row">
+          ${todayEvents.map(event => `
+            <div class="col-md-6 col-lg-4 mb-3">
+              <div class="card h-100 border-start border-4" style="border-left-color: ${event.color} !important;" onclick="editEvent(${event.id})">
+                <div class="card-body">
+                  <h5 class="card-title">${escapeHtml(event.title)}</h5>
+                  <p class="card-text text-muted small">
+                    <i class="bi bi-clock"></i> ${new Date(event.start_datetime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} - 
+                    ${new Date(event.end_datetime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </p>
+                  ${event.description ? `<p class="card-text">${escapeHtml(event.description)}</p>` : ''}
+                </div>
               </div>
-              <div class="card-footer bg-transparent border-0 d-flex gap-2">
-                <button class="btn btn-sm btn-outline-primary" onclick="editEvent(${event.id})">
-                  <i class="bi bi-pencil"></i> Edit
-                </button>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteEvent(${event.id})">
-                  <i class="bi bi-trash"></i> Delete
-                </button>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function renderUpcomingView() {
+      const now = new Date();
+      const upcomingEvents = allEvents
+        .filter(event => new Date(event.start_datetime) > now)
+        .sort((a, b) => new Date(a.start_datetime) - new Date(b.start_datetime))
+        .slice(0, 20);
+
+      if (upcomingEvents.length === 0) {
+        return '<div class="alert alert-info"><i class="bi bi-calendar-x"></i> No upcoming events.</div>';
+      }
+
+      return `
+        <div class="row">
+          ${upcomingEvents.map(event => `
+            <div class="col-md-6 col-lg-4 mb-3">
+              <div class="card h-100 border-start border-4" style="border-left-color: ${event.color} !important;" onclick="editEvent(${event.id})">
+                <div class="card-body">
+                  <h5 class="card-title">${escapeHtml(event.title)}</h5>
+                  <p class="card-text text-muted small">
+                    <i class="bi bi-calendar"></i> ${new Date(event.start_datetime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}<br>
+                    <i class="bi bi-clock"></i> ${new Date(event.start_datetime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} - 
+                    ${new Date(event.end_datetime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </p>
+                  ${event.description ? `<p class="card-text">${escapeHtml(event.description)}</p>` : ''}
+                </div>
               </div>
             </div>
-          </div>
-        `;
-                }).join('');
-            }
+          `).join('')}
+        </div>
+      `;
+    }
 
-            function openCreateModal() {
-                currentEventId = null;
-                document.getElementById('modalTitle').textContent = 'Create Event';
-                document.getElementById('eventForm').reset();
-                document.getElementById('eventColor').value = '#3b82f6';
-            }
+    function renderWeekView() {
+      const weekStart = getWeekStart(currentDate);
+      const days = [];
+      for (let i = 0; i < 7; i++) {
+        const day = new Date(weekStart);
+        day.setDate(day.getDate() + i);
+        days.push(day);
+      }
 
-            async function editEvent(id) {
-                try {
-                    const response = await fetch('/api/events');
-                    const events = await response.json();
-                    const event = events.find(e => e.id === id);
+      const hours = Array.from({length: 24}, (_, i) => i);
 
-                    if (!event) return;
+      return `
+        <div class="week-view-container">
+          <div class="week-time-slot"></div>
+          ${days.map(day => `
+            <div class="calendar-day-header">
+              ${day.toLocaleDateString('en-US', { weekday: 'short' })}<br>
+              <span class="fs-5">${day.getDate()}</span>
+            </div>
+          `).join('')}
+          
+          ${hours.map(hour => `
+            <div class="week-time-slot">${hour % 12 || 12}${hour < 12 ? 'am' : 'pm'}</div>
+            ${days.map(day => {
+              const dayEvents = getEventsForDay(day).filter(event => {
+                const eventHour = new Date(event.start_datetime).getHours();
+                return eventHour === hour;
+              });
+              return `
+                <div class="week-day-column">
+                  ${dayEvents.map(event => `
+                    <div class="week-event" style="background-color: ${event.color}20; border-left: 3px solid ${event.color};" onclick="editEvent(${event.id})">
+                      ${escapeHtml(event.title)}
+                    </div>
+                  `).join('')}
+                </div>
+              `;
+            }).join('')}
+          `).join('')}
+        </div>
+      `;
+    }
 
-                    currentEventId = id;
-                    document.getElementById('modalTitle').textContent = 'Edit Event';
-                    document.getElementById('eventId').value = event.id;
-                    document.getElementById('eventTitle').value = event.title;
-                    document.getElementById('eventDescription').value = event.description || '';
-                    document.getElementById('eventStart').value = formatDateTimeLocal(event.start_datetime);
-                    document.getElementById('eventEnd').value = formatDateTimeLocal(event.end_datetime);
-                    document.getElementById('eventColor').value = event.color;
+    function renderMonthView() {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      const startDate = new Date(firstDay);
+      startDate.setDate(startDate.getDate() - firstDay.getDay());
 
-                    modal.show();
-                } catch (error) {
-                    console.error('Error loading event:', error);
-                    alert('Failed to load event details');
-                }
-            }
+      const days = [];
+      const currentDateIter = new Date(startDate);
+      while (currentDateIter <= lastDay || days.length % 7 !== 0) {
+        days.push(new Date(currentDateIter));
+        currentDateIter.setDate(currentDateIter.getDate() + 1);
+      }
 
-            async function saveEvent() {
-                const title = document.getElementById('eventTitle').value.trim();
-                const description = document.getElementById('eventDescription').value.trim();
-                const start = document.getElementById('eventStart').value;
-                const end = document.getElementById('eventEnd').value;
-                const color = document.getElementById('eventColor').value;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
-                if (!title || !start || !end) {
-                    alert('Please fill in all required fields');
-                    return;
-                }
+      return `
+        <div class="calendar-grid">
+          ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => 
+            `<div class="calendar-day-header">${day}</div>`
+          ).join('')}
+          
+          ${days.map(day => {
+            const isCurrentMonth = day.getMonth() === month;
+            const isToday = day.getTime() === today.getTime();
+            const dayEvents = getEventsForDay(day);
+            
+            return `
+              <div class="calendar-day ${!isCurrentMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}">
+                <div class="calendar-day-number">${day.getDate()}</div>
+                ${dayEvents.slice(0, 3).map(event => `
+                  <div class="calendar-event" style="background-color: ${event.color}20; border-left: 3px solid ${event.color};" onclick="editEvent(${event.id})">
+                    ${escapeHtml(event.title)}
+                  </div>
+                `).join('')}
+                ${dayEvents.length > 3 ? `<div class="text-muted small">+${dayEvents.length - 3} more</div>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
 
-                if (new Date(start) >= new Date(end)) {
-                    alert('End time must be after start time');
-                    return;
-                }
+    function getWeekStart(date) {
+      const d = new Date(date);
+      const day = d.getDay();
+      const diff = d.getDate() - day;
+      return new Date(d.setDate(diff));
+    }
 
-                const eventData = {
-                    title,
-                    description,
-                    start_datetime: start,
-                    end_datetime: end,
-                    color
-                };
+    function getEventsForDay(date) {
+      const dayStart = new Date(date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(date);
+      dayEnd.setHours(23, 59, 59, 999);
 
-                try {
-                    let response;
-                    if (currentEventId) {
-                        response = await fetch(`/api/events/${currentEventId}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(eventData)
-                        });
-                    } else {
-                        response = await fetch('/api/events', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(eventData)
-                        });
-                    }
+      return allEvents.filter(event => {
+        const eventStart = new Date(event.start_datetime);
+        const eventEnd = new Date(event.end_datetime);
+        return (eventStart >= dayStart && eventStart <= dayEnd) ||
+               (eventEnd >= dayStart && eventEnd <= dayEnd) ||
+               (eventStart <= dayStart && eventEnd >= dayEnd);
+      });
+    }
 
-                    if (response.ok) {
-                        modal.hide();
-                        loadEvents();
-                    } else {
-                        alert('Failed to save event');
-                    }
-                } catch (error) {
-                    console.error('Error saving event:', error);
-                    alert('Failed to save event');
-                }
-            }
+    function openCreateModal() {
+      currentEventId = null;
+      document.getElementById('modalTitle').textContent = 'Create Event';
+      document.getElementById('eventForm').reset();
+      document.getElementById('eventColor').value = '#3b82f6';
+      document.getElementById('deleteBtn').style.display = 'none';
+    }
 
-            async function deleteEvent(id) {
-                if (!confirm('Are you sure you want to delete this event?')) return;
+    async function editEvent(id) {
+      const event = allEvents.find(e => e.id === id);
+      if (!event) return;
 
-                try {
-                    const response = await fetch(`/api/events/${id}`, {
-                        method: 'DELETE'
-                    });
+      currentEventId = id;
+      document.getElementById('modalTitle').textContent = 'Edit Event';
+      document.getElementById('eventId').value = event.id;
+      document.getElementById('eventTitle').value = event.title;
+      document.getElementById('eventDescription').value = event.description || '';
+      document.getElementById('eventStart').value = formatDateTimeLocal(event.start_datetime);
+      document.getElementById('eventEnd').value = formatDateTimeLocal(event.end_datetime);
+      document.getElementById('eventColor').value = event.color;
+      document.getElementById('deleteBtn').style.display = 'block';
 
-                    if (response.ok) {
-                        loadEvents();
-                    } else {
-                        alert('Failed to delete event');
-                    }
-                } catch (error) {
-                    console.error('Error deleting event:', error);
-                    alert('Failed to delete event');
-                }
-            }
+      modal.show();
+    }
 
-            function formatDateTimeLocal(datetime) {
-                const date = new Date(datetime);
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                const hours = String(date.getHours()).padStart(2, '0');
-                const minutes = String(date.getMinutes()).padStart(2, '0');
-                return `${year}-${month}-${day}T${hours}:${minutes}`;
-            }
+    async function saveEvent() {
+      const title = document.getElementById('eventTitle').value.trim();
+      const description = document.getElementById('eventDescription').value.trim();
+      const start = document.getElementById('eventStart').value;
+      const end = document.getElementById('eventEnd').value;
+      const color = document.getElementById('eventColor').value;
 
-            function escapeHtml(text) {
-                const div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
-            }
-        </script>
+      if (!title || !start || !end) {
+        alert('Please fill in all required fields');
+        return;
+      }
+
+      if (new Date(start) >= new Date(end)) {
+        alert('End time must be after start time');
+        return;
+      }
+
+      const eventData = { title, description, start_datetime: start, end_datetime: end, color };
+
+      try {
+        let response;
+        if (currentEventId) {
+          response = await fetch(`/api/events/${currentEventId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(eventData)
+          });
+        } else {
+          response = await fetch('/api/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(eventData)
+          });
+        }
+
+        if (response.ok) {
+          modal.hide();
+          loadEvents();
+        } else {
+          alert('Failed to save event');
+        }
+      } catch (error) {
+        console.error('Error saving event:', error);
+        alert('Failed to save event');
+      }
+    }
+
+    async function deleteEvent() {
+      if (!currentEventId || !confirm('Are you sure you want to delete this event?')) return;
+
+      try {
+        const response = await fetch(`/api/events/${currentEventId}`, { method: 'DELETE' });
+        if (response.ok) {
+          modal.hide();
+          loadEvents();
+        } else {
+          alert('Failed to delete event');
+        }
+      } catch (error) {
+        console.error('Error deleting event:', error);
+        alert('Failed to delete event');
+      }
+    }
+
+    function formatDateTimeLocal(datetime) {
+      const date = new Date(datetime);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
