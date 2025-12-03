@@ -9,127 +9,128 @@
         <i class="bi bi-person-plus"></i> Add Friend
       </button>
     </div>
+    <div id="friends-container">
+      <!-- Tabs -->
+      <ul class="nav nav-tabs mb-4" id="friendsTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="accepted-tab" data-bs-toggle="tab" data-bs-target="#accepted" type="button">
+            Accepted <span class="badge bg-primary ms-1"><%= friends.length %></span>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="pending-tab" data-bs-toggle="tab" data-bs-target="#pending" type="button">
+            Pending 
+            <% if (pendingRequests.length > 0) { %>
+              <span class="badge bg-danger ms-1"><%= pendingRequests.length %></span>
+            <% } %>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="sent-tab" data-bs-toggle="tab" data-bs-target="#sent" type="button">
+            Sent <span class="badge bg-secondary ms-1"><%= sentRequests.length %></span>
+          </button>
+        </li>
+      </ul>
 
-    <!-- Tabs -->
-    <ul class="nav nav-tabs mb-4" id="friendsTabs" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="accepted-tab" data-bs-toggle="tab" data-bs-target="#accepted" type="button">
-          Accepted <span class="badge bg-primary ms-1"><%= friends.length %></span>
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="pending-tab" data-bs-toggle="tab" data-bs-target="#pending" type="button">
-          Pending 
-          <% if (pendingRequests.length > 0) { %>
-            <span class="badge bg-danger ms-1"><%= pendingRequests.length %></span>
+      <!-- Tab Content -->
+      <div class="tab-content" id="friendsTabContent">
+        <!-- Accepted Friends -->
+        <div class="tab-pane fade show active" id="accepted" role="tabpanel">
+          <% if (friends.length === 0) { %>
+            <div class="alert alert-info">
+              <i class="bi bi-info-circle"></i> You don't have any friends yet. Add some friends to get started!
+            </div>
+          <% } else { %>
+            <div class="row">
+              <% friends.forEach(friend => { %>
+                <div class="col-md-6 col-lg-4 mb-3">
+                  <div class="card">
+                    <div class="card-body">
+                      <div class="d-flex align-items-center mb-3">
+                        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
+                             style="width: 50px; height: 50px; font-size: 1.5rem;">
+                          <%= friend.username.charAt(0).toUpperCase() %>
+                        </div>
+                        <div>
+                          <h5 class="card-title mb-0"><%= friend.username %></h5>
+                          <small class="text-muted">Friends since <%= new Date(friend.created_at).toLocaleDateString() %></small>
+                        </div>
+                      </div>
+                      <button class="btn btn-sm btn-outline-danger w-100" onclick="removeFriend(<%= friend.id %>, '<%= friend.username %>')">
+                        <i class="bi bi-person-x"></i> Remove Friend
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              <% }); %>
+            </div>
           <% } %>
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="sent-tab" data-bs-toggle="tab" data-bs-target="#sent" type="button">
-          Sent <span class="badge bg-secondary ms-1"><%= sentRequests.length %></span>
-        </button>
-      </li>
-    </ul>
+        </div>
 
-    <!-- Tab Content -->
-    <div class="tab-content" id="friendsTabContent">
-      <!-- Accepted Friends -->
-      <div class="tab-pane fade show active" id="accepted" role="tabpanel">
-        <% if (friends.length === 0) { %>
-          <div class="alert alert-info">
-            <i class="bi bi-info-circle"></i> You don't have any friends yet. Add some friends to get started!
-          </div>
-        <% } else { %>
-          <div class="row">
-            <% friends.forEach(friend => { %>
-              <div class="col-md-6 col-lg-4 mb-3">
-                <div class="card">
-                  <div class="card-body">
-                    <div class="d-flex align-items-center mb-3">
-                      <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
-                           style="width: 50px; height: 50px; font-size: 1.5rem;">
-                        <%= friend.username.charAt(0).toUpperCase() %>
+        <!-- Pending Requests (Incoming) -->
+        <div class="tab-pane fade" id="pending" role="tabpanel">
+          <% if (pendingRequests.length === 0) { %>
+            <div class="alert alert-info">
+              <i class="bi bi-info-circle"></i> No pending friend requests.
+            </div>
+          <% } else { %>
+            <div class="list-group">
+              <% pendingRequests.forEach(request => { %>
+                <div class="list-group-item">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                      <div class="bg-warning text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
+                           style="width: 40px; height: 40px;">
+                        <%= request.username.charAt(0).toUpperCase() %>
                       </div>
                       <div>
-                        <h5 class="card-title mb-0"><%= friend.username %></h5>
-                        <small class="text-muted">Friends since <%= new Date(friend.created_at).toLocaleDateString() %></small>
+                        <h6 class="mb-0"><%= request.username %></h6>
+                        <small class="text-muted">Sent <%= new Date(request.created_at).toLocaleDateString() %></small>
                       </div>
                     </div>
-                    <button class="btn btn-sm btn-outline-danger w-100" onclick="removeFriend(<%= friend.id %>, '<%= friend.username %>')">
-                      <i class="bi bi-person-x"></i> Remove Friend
-                    </button>
+                    <div class="btn-group">
+                      <button class="btn btn-sm btn-success" onclick="acceptRequest(<%= request.friendship_id %>)">
+                        <i class="bi bi-check-lg"></i> Accept
+                      </button>
+                      <button class="btn btn-sm btn-danger" onclick="rejectRequest(<%= request.friendship_id %>)">
+                        <i class="bi bi-x-lg"></i> Reject
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            <% }); %>
-          </div>
-        <% } %>
-      </div>
+              <% }); %>
+            </div>
+          <% } %>
+        </div>
 
-      <!-- Pending Requests (Incoming) -->
-      <div class="tab-pane fade" id="pending" role="tabpanel">
-        <% if (pendingRequests.length === 0) { %>
-          <div class="alert alert-info">
-            <i class="bi bi-info-circle"></i> No pending friend requests.
-          </div>
-        <% } else { %>
-          <div class="list-group">
-            <% pendingRequests.forEach(request => { %>
-              <div class="list-group-item">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div class="d-flex align-items-center">
-                    <div class="bg-warning text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
-                         style="width: 40px; height: 40px;">
-                      <%= request.username.charAt(0).toUpperCase() %>
+        <!-- Sent Requests (Outgoing) -->
+        <div class="tab-pane fade" id="sent" role="tabpanel">
+          <% if (sentRequests.length === 0) { %>
+            <div class="alert alert-info">
+              <i class="bi bi-info-circle"></i> No pending sent requests.
+            </div>
+          <% } else { %>
+            <div class="list-group">
+              <% sentRequests.forEach(request => { %>
+                <div class="list-group-item">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                      <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
+                           style="width: 40px; height: 40px;">
+                        <%= request.username.charAt(0).toUpperCase() %>
+                      </div>
+                      <div>
+                        <h6 class="mb-0"><%= request.username %></h6>
+                        <small class="text-muted">Sent <%= new Date(request.created_at).toLocaleDateString() %></small>
+                      </div>
                     </div>
-                    <div>
-                      <h6 class="mb-0"><%= request.username %></h6>
-                      <small class="text-muted">Sent <%= new Date(request.created_at).toLocaleDateString() %></small>
-                    </div>
-                  </div>
-                  <div class="btn-group">
-                    <button class="btn btn-sm btn-success" onclick="acceptRequest(<%= request.friendship_id %>)">
-                      <i class="bi bi-check-lg"></i> Accept
-                    </button>
-                    <button class="btn btn-sm btn-danger" onclick="rejectRequest(<%= request.friendship_id %>)">
-                      <i class="bi bi-x-lg"></i> Reject
-                    </button>
+                    <span class="badge bg-warning text-dark">Pending</span>
                   </div>
                 </div>
-              </div>
-            <% }); %>
-          </div>
-        <% } %>
-      </div>
-
-      <!-- Sent Requests (Outgoing) -->
-      <div class="tab-pane fade" id="sent" role="tabpanel">
-        <% if (sentRequests.length === 0) { %>
-          <div class="alert alert-info">
-            <i class="bi bi-info-circle"></i> No pending sent requests.
-          </div>
-        <% } else { %>
-          <div class="list-group">
-            <% sentRequests.forEach(request => { %>
-              <div class="list-group-item">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div class="d-flex align-items-center">
-                    <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
-                         style="width: 40px; height: 40px;">
-                      <%= request.username.charAt(0).toUpperCase() %>
-                    </div>
-                    <div>
-                      <h6 class="mb-0"><%= request.username %></h6>
-                      <small class="text-muted">Sent <%= new Date(request.created_at).toLocaleDateString() %></small>
-                    </div>
-                  </div>
-                  <span class="badge bg-warning text-dark">Pending</span>
-                </div>
-              </div>
-            <% }); %>
-          </div>
-        <% } %>
+              <% }); %>
+            </div>
+          <% } %>
+        </div>
       </div>
     </div>
   </div>
@@ -277,6 +278,25 @@
         alert('Failed to remove friend');
       }
     }
+
+    async function refreshFriends() {
+      try {
+        const res = await fetch('/friends');
+        const html = await res.text();
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+        const newList = doc.querySelector("#friends-container");
+        
+        if (newList) {
+          document.querySelector("#friends-container").innerHTML = newList.innerHTML;
+        }
+      } catch (e) {
+        console.error("Failed to refresh friends:", e);
+      }
+    }
+
+    setInterval(refreshFriends, 5000);
 
     function escapeHtml(text) {
       const div = document.createElement('div');
