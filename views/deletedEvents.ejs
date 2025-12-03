@@ -1,0 +1,130 @@
+<%- include('templates/header', { title: 'Deleted Events', loggedIn, username }) %>
+
+<div class="container mt-4">
+
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">Deleted Events</h2>
+    <a href="/" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> Back to Calendar
+    </a>
+  </div>
+
+  <% if (!events || events.length === 0) { %>
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle"></i> No deleted events found.
+    </div>
+  <% } else { %>
+
+    <div class="row">
+      <% events.forEach(event => { %>
+        <div class="col-md-6 col-lg-4 mb-3">
+          <div
+            class="card h-100 border-start border-4 event-card"
+            data-color="<%= event.color || '#3b82f6' %>"
+          >
+
+            <div class="card-body">
+              <h5 class="card-title"><%= event.title %></h5>
+
+              <p class="card-text text-muted small">
+                <i class="bi bi-calendar"></i>
+                Deleted on:
+                <%= new Date(event.deleted_at).toLocaleDateString() %><br>
+
+                <i class="bi bi-clock"></i>
+                <%= new Date(event.start_datetime).toLocaleString() %> →
+                <%= new Date(event.end_datetime).toLocaleString() %>
+              </p>
+
+              <% if (event.description) { %>
+                <p class="card-text"><%= event.description %></p>
+              <% } %>
+            </div>
+
+            <div class="card-footer d-flex justify-content-between">
+              <button
+                class="btn btn-sm btn-success restore-btn"
+                data-id="<%= event.id %>"
+              >
+                <i class="bi bi-arrow-counterclockwise"></i> Restore
+              </button>
+
+              <button
+                class="btn btn-sm btn-danger delete-forever-btn"
+                data-id="<%= event.id %>"
+              >
+                <i class="bi bi-trash"></i> Delete Forever
+              </button>
+            </div>
+
+          </div>
+        </div>
+      <% }) %>
+    </div>
+
+  <% } %>
+
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll(".event-card").forEach(card => {
+      const color = card.getAttribute("data-color") || "#3b82f6";
+      card.style.borderLeftColor = color;
+    });
+
+    document.querySelectorAll(".restore-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-id");
+        if (!confirm("Restore this event?")) return;
+
+        try {
+          const res = await fetch(`/api/events/${id}/restore`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok || !data.success) {
+            alert(data.error || "Failed to restore event");
+            return;
+          }
+
+          location.reload();
+        } catch (err) {
+          console.error(err);
+          alert("Error restoring event");
+        }
+      });
+    });
+
+    document.querySelectorAll(".delete-forever-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-id");
+        if (!confirm("Permanently delete this event? This cannot be undone.")) return;
+
+        try {
+          const res = await fetch(`/api/events/${id}/delete-forever`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" }
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok || !data.success) {
+            alert(data.error || "Failed to permanently delete event");
+            return;
+          }
+
+          location.reload();
+        } catch (err) {
+          console.error(err);
+          alert("Error deleting event");
+        }
+      });
+    });
+  });
+</script>
+
+<%- include('templates/footer') %>
