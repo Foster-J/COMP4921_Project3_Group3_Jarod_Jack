@@ -137,6 +137,30 @@ async function ensureFriendshipsTable() {
   }
 }
 
+// Ensure event_participants table exists
+async function ensureEventParticipantsTable() {
+  const createSQL = `
+    CREATE TABLE IF NOT EXISTS event_participants (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      event_id INT NOT NULL,
+      user_id INT NOT NULL,
+      role ENUM('owner','attendee') DEFAULT 'attendee',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE KEY unique_event_user (event_id, user_id),
+      INDEX idx_event (event_id),
+      INDEX idx_user (user_id)
+    );
+  `;
+  try {
+    await database.query(createSQL);
+    console.log("Event participants table is ready!");
+  } catch (err) {
+    console.error("Error ensuring event_participants table:", err);
+  }
+}
+
 // Permanently remove events that were deleted more than 30 days ago
 async function purgeOldDeletedEvents() {
   try {
@@ -152,6 +176,7 @@ async function purgeOldDeletedEvents() {
 ensureUsersTable();
 ensureCalendarEventsTable();
 ensureFriendshipsTable();
+ensureEventParticipantsTable();
 purgeOldDeletedEvents();
 
 function ensureLoggedIn(req, res, next) {
@@ -174,12 +199,38 @@ async function getUserId(req) {
   return rows[0].id;
 }
 
+async function getFriendIds(userId) {
+  const [rows] = await database.query(
+    `
+    SELECT
+      CASE
+        WHEN requester_id = ? THEN addressee_id
+        ELSE requester_id
+      END AS friend_id
+    FROM friendships
+    WHERE (requester_id = ? OR addressee_id = ?)
+      AND status = 'accepted'
+    `,
+    [userId, userId, userId]
+  );
+
+  return rows.map(r => r.friend_id);
+}
+
+
 app.get("/", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
     const [events] = await database.query(
-      "SELECT * FROM calendar_events WHERE user_id = ? AND deleted_at IS NULL ORDER BY start_datetime ASC",
-      [userId]
+      `
+      SELECT DISTINCT ce.*
+      FROM calendar_events ce
+      LEFT JOIN event_participants ep ON ce.id = ep.event_id
+      WHERE ce.deleted_at IS NULL
+        AND (ce.user_id = ? OR ep.user_id = ?)
+      ORDER BY ce.start_datetime ASC
+      `,
+      [userId, userId]
     );
     res.render("calendar", { events });
   } catch (err) {
@@ -188,13 +239,21 @@ app.get("/", ensureLoggedIn, async (req, res) => {
   }
 });
 
-// Get events as JSON (for calendar display)
+
+// Get events as JSON (for calendar display, including events user is invited to)
 app.get("/api/events", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
     const [events] = await database.query(
-      "SELECT * FROM calendar_events WHERE user_id = ? AND deleted_at IS NULL ORDER BY start_datetime ASC",
-      [userId]
+      `
+      SELECT DISTINCT ce.*
+      FROM calendar_events ce
+      LEFT JOIN event_participants ep ON ce.id = ep.event_id
+      WHERE ce.deleted_at IS NULL
+        AND (ce.user_id = ? OR ep.user_id = ?)
+      ORDER BY ce.start_datetime ASC
+      `,
+      [userId, userId]
     );
     res.json(events);
   } catch (err) {
@@ -203,11 +262,18 @@ app.get("/api/events", ensureLoggedIn, async (req, res) => {
   }
 });
 
-// Create new event
+// Create new event (with optional invited friends)
 app.post("/api/events", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
-    const { title, description, start_datetime, end_datetime, color } = req.body;
+    const {
+      title,
+      description,
+      start_datetime,
+      end_datetime,
+      color,
+      invited_user_ids
+    } = req.body;
 
     if (!title || !start_datetime || !end_datetime) {
       return res.status(400).json({ error: "Title, start time, and end time are required" });
@@ -218,9 +284,36 @@ app.post("/api/events", ensureLoggedIn, async (req, res) => {
       [userId, title, description || null, start_datetime, end_datetime, color || '#3b82f6']
     );
 
+    const eventId = result.insertId;
+
+    // Always add owner as participant
+    try {
+      await database.query(
+        "INSERT IGNORE INTO event_participants (event_id, user_id, role) VALUES (?, ?, 'owner')",
+        [eventId, userId]
+      );
+
+      if (Array.isArray(invited_user_ids) && invited_user_ids.length > 0) {
+        const friendIds = await getFriendIds(userId);
+        const allowedSet = new Set(friendIds.map(Number));
+
+        const uniqueInvited = [...new Set(invited_user_ids.map(Number))]
+          .filter(id => allowedSet.has(id) && id !== userId);
+
+        for (const invitedId of uniqueInvited) {
+          await database.query(
+            "INSERT IGNORE INTO event_participants (event_id, user_id, role) VALUES (?, ?, 'attendee')",
+            [eventId, invitedId]
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Error inserting event participants:", err);
+    }
+
     const [newEvent] = await database.query(
       "SELECT * FROM calendar_events WHERE id = ?",
-      [result.insertId]
+      [eventId]
     );
 
     res.json(newEvent[0]);
@@ -229,6 +322,8 @@ app.post("/api/events", ensureLoggedIn, async (req, res) => {
     res.status(500).json({ error: "Failed to create event" });
   }
 });
+
+
 
 // Update event
 app.put("/api/events/:id", ensureLoggedIn, async (req, res) => {
@@ -270,13 +365,35 @@ app.delete("/api/events/:id", ensureLoggedIn, async (req, res) => {
     const userId = await getUserId(req);
     const eventId = req.params.id;
 
+    // Get event + owner info
+    const [rows] = await database.query(
+      `SELECT ce.id, ce.user_id, u.username AS owner_username
+       FROM calendar_events ce
+       INNER JOIN users u ON ce.user_id = u.id
+       WHERE ce.id = ? AND ce.deleted_at IS NULL`,
+      [eventId]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+
+    const event = rows[0];
+
+    if (event.user_id !== userId) {
+      return res.status(403).json({
+        error: `Only ${event.owner_username} can delete this event.`
+      });
+    }
+
+    // Owner: perform soft delete
     const [result] = await database.query(
-      "UPDATE calendar_events SET deleted_at = NOW() WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
-      [eventId, userId]
+      "UPDATE calendar_events SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL",
+      [eventId]
     );
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: "Event not found" });
+      return res.status(404).json({ error: "Event not found or already deleted" });
     }
 
     res.json({ success: true });
@@ -567,6 +684,115 @@ app.delete("/api/friends/:id", ensureLoggedIn, async (req, res) => {
     res.status(500).json({ error: "Failed to remove friend" });
   }
 });
+
+// Get list of accepted friends as JSON
+app.get("/api/friends/list", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const friendIds = await getFriendIds(userId);
+
+    if (friendIds.length === 0) {
+      return res.json([]);
+    }
+
+    const placeholders = friendIds.map(() => "?").join(", ");
+    const [rows] = await database.query(
+      `SELECT id, username FROM users WHERE id IN (${placeholders}) ORDER BY username ASC`,
+      friendIds
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Error loading friends list:", err);
+    res.status(500).json({ error: "Failed to load friends list" });
+  }
+});
+
+// Find common free time slots between the current user and selected friends
+app.post("/api/schedule/availability", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    let { user_ids, start_datetime, end_datetime, slot_minutes } = req.body;
+
+    if (!start_datetime || !end_datetime) {
+      return res.status(400).json({ error: "start_datetime and end_datetime are required" });
+    }
+
+    const start = new Date(start_datetime);
+    const end = new Date(end_datetime);
+    if (isNaN(start) || isNaN(end) || start >= end) {
+      return res.status(400).json({ error: "Invalid date range" });
+    }
+
+    slot_minutes = Number(slot_minutes) || 60;
+    if (slot_minutes <= 0) {
+      return res.status(400).json({ error: "slot_minutes must be positive" });
+    }
+
+    if (!Array.isArray(user_ids)) {
+      user_ids = [];
+    }
+    user_ids = user_ids.map(Number).filter(id => !isNaN(id));
+
+    if (!user_ids.includes(userId)) {
+      user_ids.push(userId);
+    }
+
+    const friendIds = await getFriendIds(userId);
+    const allowedSet = new Set([userId, ...friendIds.map(Number)]);
+    const uniqueUserIds = [...new Set(user_ids)].filter(id => allowedSet.has(id));
+
+    if (uniqueUserIds.length === 0) {
+      return res.status(400).json({ error: "No valid users to check availability for" });
+    }
+
+    // Load all events for these users that overlap the date range
+    const placeholders = uniqueUserIds.map(() => "?").join(", ");
+    const params = [...uniqueUserIds, start_datetime, end_datetime];
+
+    const [rows] = await database.query(
+      `
+      SELECT user_id, start_datetime, end_datetime
+      FROM calendar_events
+      WHERE user_id IN (${placeholders})
+        AND deleted_at IS NULL
+        AND NOT (end_datetime <= ? OR start_datetime >= ?)
+      `,
+      params
+    );
+
+    // Convert busy intervals
+    const busyIntervals = rows.map(r => ({
+      start: new Date(r.start_datetime),
+      end: new Date(r.end_datetime)
+    }));
+
+    const slotMs = slot_minutes * 60 * 1000;
+    const freeSlots = [];
+
+    for (let t = start.getTime(); t + slotMs <= end.getTime(); t += slotMs) {
+      const slotStart = new Date(t);
+      const slotEnd = new Date(t + slotMs);
+
+      const isBusy = busyIntervals.some(interval => {
+        return !(interval.end <= slotStart || interval.start >= slotEnd);
+      });
+
+      if (!isBusy) {
+        freeSlots.push({
+          start: slotStart.toISOString(),
+          end: slotEnd.toISOString()
+        });
+      }
+    }
+
+    res.json({ slots: freeSlots });
+  } catch (err) {
+    console.error("Error finding common availability:", err);
+    res.status(500).json({ error: "Failed to find common availability" });
+  }
+});
+
 
 // Profile page
 app.get("/profile", ensureLoggedIn, async (req, res) => {
