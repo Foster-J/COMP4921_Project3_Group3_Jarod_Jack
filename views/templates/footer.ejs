@@ -3,22 +3,53 @@
     &copy; <%= new Date().getFullYear() %> Project 2
   </div>
 </footer>
-<script type="text/javascript">
+
+<div id="chat-toast" style="
+       position: fixed;
+       bottom: 25px;
+       right: 100px;
+       background: #0d6efd;
+       color: white;
+       padding: 10px 15px;
+       border-radius: 8px;
+       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+       opacity: 0;
+       transition: opacity 0.3s ease-in-out;
+       z-index: 99999;
+     ">
+  New message received
+</div>
+
+
+<script>
   $.cloudinary.config({ cloud_name: '<%= process.env.CLOUDINARY_CLOUD_NAME %>', secure: true });
 </script>
+
+<script id="user-id-json" type="application/json">
+  <%= JSON.stringify(currentUserId || null) %>
+</script>
+
+<script src="/socket.io/socket.io.js"></script>
+
 <script>
+  const rawUserId = document.getElementById("user-id-json").textContent.trim();
+  window.CURRENT_USER_ID = rawUserId ? JSON.parse(rawUserId) : null;
+  console.log("CURRENT_USER_ID =", window.CURRENT_USER_ID);
+
+  const socket = io({
+    query: { userId: window.CURRENT_USER_ID }
+  });
+
   async function refreshActivityBadge() {
     try {
       const badge = document.getElementById('activity-badge');
-      if (!badge) return; 
+      if (!badge) return;
 
       const res = await fetch('/api/activity');
       if (!res.ok) return;
 
       const data = await res.json();
-      const count = typeof data.unreadCount === 'number'
-        ? data.unreadCount
-        : (data.activities || []).length;
+      const count = data.unreadCount ?? (data.activities || []).length;
 
       if (count > 0) {
         badge.textContent = count;
@@ -31,12 +62,250 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', function () {
+    const bubble = document.getElementById('chat-bubble');
+    const windowEl = document.getElementById('chat-window');
+    const closeBtn = document.getElementById('chat-close');
+    const friendSel = document.getElementById('chat-friend-select');
+    const msgBox = document.getElementById('chat-messages');
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('chat-send');
+
+    let currentFriendId = null;
+    let friendsById = {};
+    const unreadCounts = {};
+
+    console.log("Chat initialized. UserID:", window.CURRENT_USER_ID);
+
+    bubble?.addEventListener("click", () => {
+      const wasHidden = windowEl.classList.contains("d-none");
+      windowEl.classList.toggle("d-none");
+      if (wasHidden) {
+        if (friendSel && friendSel.options.length <= 1) {
+          loadFriends();
+        }
+        if (currentFriendId) {
+          unreadCounts[currentFriendId] = 0;
+          updateChatBadge();
+        }
+      }
+    });
+
+
+
+    closeBtn?.addEventListener("click", () => windowEl.classList.add("d-none"));
+
+    function updateChatBadge() {
+      const badge = document.getElementById("chat-unread");
+      if (!badge) return;
+
+      const totalUnread = Object.values(unreadCounts).reduce((sum, n) => sum + (n || 0), 0);
+
+      if (totalUnread > 0) {
+        badge.textContent = totalUnread;
+        badge.classList.remove("d-none");
+      } else {
+        badge.textContent = "";
+        badge.classList.add("d-none");
+      }
+    }
+
+    async function loadFriends() {
+      try {
+        const res = await fetch('/api/friends/list');
+        if (!res.ok) throw new Error("Failed to fetch friends");
+
+        const friends = await res.json();
+        friendSel.innerHTML = '<option value="">Select a friend…</option>';
+        friendsById = {};
+
+        if (!friends.length) {
+          friendSel.innerHTML = '<option value="">No friends yet</option>';
+          msgBox.innerHTML = '<div class="text-muted small">You don\'t have any friends yet.</div>';
+          input.disabled = true;
+          sendBtn.disabled = true;
+          return;
+        }
+
+        friends.forEach(f => {
+          friendsById[f.id] = f;
+          const opt = document.createElement("option");
+          opt.value = f.id;
+          opt.textContent = f.username;
+          friendSel.appendChild(opt);
+        });
+
+        msgBox.innerHTML = '<div class="text-muted small">Select a friend to see your messages.</div>';
+
+      } catch (err) {
+        console.error(err);
+        msgBox.innerHTML = '<div class="text-danger small">Failed to load friends.</div>';
+      }
+    }
+
+    friendSel?.addEventListener("change", async () => {
+      currentFriendId = friendSel.value || null;
+      if (currentFriendId) {
+        unreadCounts[currentFriendId] = 0;
+      }
+      updateChatBadge();
+
+      if (!currentFriendId) {
+        msgBox.innerHTML = '<div class="text-muted small">Select a friend to start chatting 👋</div>';
+        input.disabled = true;
+        sendBtn.disabled = true;
+        return;
+      }
+
+      input.disabled = false;
+      sendBtn.disabled = false;
+
+      await loadMessages(currentFriendId);
+    });
+
+
+    async function loadMessages(id) {
+      try {
+        msgBox.innerHTML = '<div class="text-muted small">Loading messages…</div>';
+
+        const res = await fetch(`/api/messages/${id}`);
+        if (!res.ok) throw new Error("Failed to fetch messages");
+
+        renderMessages(await res.json());
+
+      } catch (err) {
+        console.error(err);
+        msgBox.innerHTML = '<div class="text-danger small">Failed to load messages.</div>';
+      }
+    }
+
+    function renderMessages(messages) {
+      msgBox.innerHTML = "";
+
+      if (!messages.length) {
+        msgBox.innerHTML = '<div class="text-muted small no-messages-placeholder">No messages yet. Say hi!</div>';
+        return;
+      }
+
+      messages.forEach(m => appendMessage(m));
+
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
+
+    function showToast(message = "New message received") {
+      const toast = document.getElementById("chat-toast");
+      toast.textContent = message;
+      toast.style.opacity = "1";
+
+      setTimeout(() => {
+        toast.style.opacity = "0";
+      }, 2500);
+    }
+
+
+    async function sendCurrentMessage() {
+      const text = input.value.trim();
+      if (!text || !currentFriendId) return;
+
+      try {
+        const res = await fetch("/api/messages/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            receiver_id: Number(currentFriendId),
+            message: text
+          })
+        });
+
+        if (!res.ok) throw new Error("Send failed");
+
+        appendMessage({
+          sender_id: window.CURRENT_USER_ID,
+          receiver_id: currentFriendId,
+          message: text,
+          created_at: new Date().toISOString()
+        });
+
+        input.value = "";
+        msgBox.scrollTop = msgBox.scrollHeight;
+
+      } catch (err) {
+        console.error("Send message error:", err);
+      }
+    }
+
+
+    function appendMessage(m) {
+      if (!msgBox) return;
+
+      const placeholder = msgBox.querySelector(".no-messages-placeholder");
+      if (placeholder) {
+        placeholder.remove();
+      }
+
+      const isMe = window.CURRENT_USER_ID &&
+        Number(m.sender_id) === Number(window.CURRENT_USER_ID);
+
+      const wrapper = document.createElement("div");
+      wrapper.classList.add("chat-message", isMe ? "me" : "them");
+
+      const bubbleEl = document.createElement("div");
+      bubbleEl.classList.add("chat-bubble-inner");
+
+      const timestamp = new Date(m.created_at).toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "America/Los_Angeles"
+      });
+
+      bubbleEl.innerHTML = `
+    <div>${escapeHtml(m.message)}</div>
+    <span class="chat-timestamp">${timestamp}</span>
+  `;
+
+      wrapper.appendChild(bubbleEl);
+      msgBox.appendChild(wrapper);
+
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
+
+
+
+
+    sendBtn?.addEventListener("click", sendCurrentMessage);
+
+    input?.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendCurrentMessage();
+      }
+    });
+
+    socket.on("message", (m) => {
+      console.log("Realtime message received:", m);
+
+      const senderId = String(m.sender_id);
+      const activeId = currentFriendId ? String(currentFriendId) : null;
+      const chatOpen = !document.getElementById("chat-window").classList.contains("d-none");
+
+      if (activeId && senderId === activeId && chatOpen) {
+        appendMessage(m);
+        msgBox.scrollTop = msgBox.scrollHeight;
+      } else {
+        unreadCounts[senderId] = (unreadCounts[senderId] || 0) + 1;
+        updateChatBadge();
+
+        showToast(`New message from ${m.sender_username || "a friend"}`);
+      }
+    });
+
+
     refreshActivityBadge();
-    setInterval(refreshActivityBadge, 5000); 
+    setInterval(refreshActivityBadge, 5000);
   });
 </script>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>
+
 </html>

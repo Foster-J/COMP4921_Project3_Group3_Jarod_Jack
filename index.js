@@ -9,6 +9,9 @@ const saltRounds = 12;
 
 const database = require("./databaseConnection");
 const app = express();
+const http = require("http").createServer(app);
+const { Server } = require("socket.io");
+const io = new Server(http);
 app.use(express.static(__dirname + "/public"));
 
 const port = process.env.PORT || 3001;
@@ -56,11 +59,20 @@ app.use(
 );
 
 // expose auth state and helper functions to views
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   res.locals.loggedIn = !!req.session.authenticated;
   res.locals.username = req.session.username || null;
+  res.locals.currentUserId = null;
+  if (req.session.authenticated) {
+    try {
+      res.locals.currentUserId = await getUserId(req);
+    } catch (e) {
+      console.error("Error getting currentUserId in middleware:", e);
+    }
+  }
   next();
 });
+
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -195,6 +207,30 @@ async function ensureActivityEventsTable() {
   }
 }
 
+// Ensure messages table exists
+async function ensureMessagesTable() {
+  const createSQL = `
+    CREATE TABLE IF NOT EXISTS messages (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      sender_id INT NOT NULL,
+      receiver_id INT NOT NULL,
+      message TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_sender (sender_id),
+      INDEX idx_receiver (receiver_id),
+      INDEX idx_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `;
+  try {
+    await database.query(createSQL);
+    console.log("Messages table is ready!");
+  } catch (err) {
+    console.error("Error ensuring messages table:", err);
+  }
+}
+
 // Permanently remove events that were deleted more than 30 days ago
 async function purgeOldDeletedEvents() {
   try {
@@ -212,6 +248,7 @@ ensureCalendarEventsTable();
 ensureFriendshipsTable();
 ensureEventParticipantsTable();
 ensureActivityEventsTable();
+ensureMessagesTable();
 purgeOldDeletedEvents();
 
 function ensureLoggedIn(req, res, next) {
@@ -494,7 +531,7 @@ app.post("/api/events/:id/restore", ensureLoggedIn, async (req, res) => {
 
     const deletedAt = new Date(rows[0].deleted_at);
     const limit = new Date();
-    limit.setDate(limit.getDate() - 30); 
+    limit.setDate(limit.getDate() - 30);
 
     if (deletedAt < limit) {
       return res.status(400).json({ error: "Event is too old to restore (older than 30 days)" });
@@ -563,7 +600,7 @@ app.post("/api/events/purge-old", ensureLoggedIn, async (req, res) => {
 app.get("/friends", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
-    
+
     // Get accepted friends
     const [friends] = await database.query(`
       SELECT u.id, u.username, f.created_at
@@ -606,7 +643,7 @@ app.get("/api/users/search", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
     const query = req.query.q || '';
-    
+
     if (query.length < 2) {
       return res.json([]);
     }
@@ -868,7 +905,10 @@ app.get("/api/friends/list", ensureLoggedIn, async (req, res) => {
 
     const placeholders = friendIds.map(() => "?").join(", ");
     const [rows] = await database.query(
-      `SELECT id, username FROM users WHERE id IN (${placeholders}) ORDER BY username ASC`,
+      `SELECT id, username
+        FROM users 
+        WHERE id IN (${placeholders}) 
+        ORDER BY username ASC`,
       friendIds
     );
 
@@ -878,6 +918,42 @@ app.get("/api/friends/list", ensureLoggedIn, async (req, res) => {
     res.status(500).json({ error: "Failed to load friends list" });
   }
 });
+
+// Load messages between current user and a friend
+app.get("/api/messages/:friendId", ensureLoggedIn, async (req, res) => {
+  const userId = await getUserId(req);
+  const friendId = Number(req.params.friendId);
+
+  const [rows] = await database.query(`
+    SELECT * FROM messages
+    WHERE (sender_id = ? AND receiver_id = ?)
+       OR (sender_id = ? AND receiver_id = ?)
+    ORDER BY created_at ASC
+  `, [userId, friendId, friendId, userId]);
+
+  res.json(rows);
+});
+
+// Send message to a friend
+app.post("/api/messages/send", ensureLoggedIn, async (req, res) => {
+  const userId = await getUserId(req);
+  const { receiver_id, message } = req.body;
+
+  await database.query(`
+  INSERT INTO messages (sender_id, receiver_id, message, created_at)
+  VALUES (?, ?, ?, CONVERT_TZ(NOW(), 'UTC', 'America/Los_Angeles'))
+`, [userId, receiver_id, message]);
+
+  io.to(`user_${receiver_id}`).emit("message", {
+    sender_id: userId,
+    receiver_id,
+    message,
+    created_at: new Date()
+  });
+
+  res.json({ success: true });
+});
+
 
 // Find common free time slots between the current user and selected friends
 app.post("/api/schedule/availability", ensureLoggedIn, async (req, res) => {
@@ -971,13 +1047,13 @@ app.get("/profile", ensureLoggedIn, async (req, res) => {
     const userId = await getUserId(req);
     const [rows] = await database.query("SELECT * FROM users WHERE id = ?", [userId]);
     const user = rows[0];
-    
+
     if (!user) return res.redirect("/");
-    
-    res.render("profile", { 
-      user: user, 
-      error: null, 
-      success: null 
+
+    res.render("profile", {
+      user: user,
+      error: null,
+      success: null
     });
   } catch (err) {
     console.error("Error loading profile:", err);
@@ -1090,6 +1166,8 @@ app.use((req, res) => {
 });
 
 // Start server
-app.listen(port, () => {
-  console.log(`Node application listening on port ${port}`);
+http.listen(port, () => console.log("Server running on " + port));
+io.on("connection", socket => {
+  const userId = socket.handshake.query.userId;
+  socket.join(`user_${userId}`);
 });

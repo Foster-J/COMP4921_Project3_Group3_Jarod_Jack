@@ -12,6 +12,118 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
   <link href="/css/style.css" rel="stylesheet">
+  <style>
+    #chat-bubble {
+      position: fixed;
+      bottom: 25px;
+      right: 25px;
+      width: 55px;
+      height: 55px;
+      background-color: #0d6efd;
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      cursor: pointer;
+      box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.25);
+      z-index: 9999;
+    }
+
+    #chat-bubble:hover {
+      background-color: #0b5ed7;
+    }
+
+    #chat-unread {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      background: red;
+      color: white;
+      font-size: 12px;
+      padding: 4px 6px;
+      border-radius: 50%;
+    }
+
+    #chat-window {
+      position: fixed;
+      bottom: 95px;
+      right: 25px;
+      width: 320px;
+      max-height: 420px;
+      background: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #chat-window .chat-header {
+      background: #0d6efd;
+      color: #fff;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #chat-window .chat-body {
+      padding: 10px;
+      flex: 1;
+      overflow-y: auto;
+      background-color: #f8f9fa;
+    }
+
+    #chat-window .chat-footer {
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      border-top: 1px solid #dee2e6;
+      background-color: #ffffff;
+    }
+
+    .chat-message {
+      margin-bottom: 6px;
+      display: flex;
+    }
+
+    .chat-message.me {
+      justify-content: flex-end;
+    }
+
+    .chat-message.them {
+      justify-content: flex-start;
+    }
+
+    .chat-bubble-inner {
+      max-width: 75%;
+      padding: 6px 10px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+    }
+
+    .chat-message.me .chat-bubble-inner {
+      background-color: #0d6efd;
+      color: #fff;
+      border-bottom-right-radius: 2px;
+    }
+
+    .chat-message.them .chat-bubble-inner {
+      background-color: #e9ecef;
+      color: #212529;
+      border-bottom-left-radius: 2px;
+    }
+
+    .chat-timestamp {
+      display: block;
+      font-size: 0.7rem;
+      opacity: 0.7;
+      margin-top: 2px;
+    }
+  </style>
 </head>
 
 <body class="d-flex flex-column min-vh-100">
@@ -45,3 +157,40 @@
       </div>
     </div>
   </nav>
+  <% if (loggedIn) { %>
+    <div id="chat-bubble">
+      <i class="fa-solid fa-comments"></i>
+      <span id="chat-unread" class="badge d-none"></span>
+    </div>
+    <div id="chat-window" class="d-none">
+      <div class="chat-header">
+        <strong>Chat</strong>
+        <div class="d-flex align-items-center gap-2">
+          <select id="chat-friend-select" class="form-select form-select-sm">
+            <option value="">Select a friend…</option>
+          </select>
+          <button type="button" id="chat-close" class="btn-close btn-close-white btn-sm"></button>
+        </div>
+      </div>
+      <div class="chat-body" id="chat-messages">
+        <div class="text-muted small">Select a friend to start chatting 👋</div>
+      </div>
+      <div class="chat-footer">
+        <input id="chat-input" type="text" class="form-control form-control-sm" placeholder="Type a message..."
+          disabled>
+        <button id="chat-send" class="btn btn-primary btn-sm ms-2" disabled>
+          <i class="fa-solid fa-paper-plane"></i>
+        </button>
+      </div>
+    </div>
+    <% } %>
+
+      <script id="user-id-json" type="application/json">
+        <%= JSON.stringify(currentUserId || null) %>
+      </script>
+
+      <script>
+        const raw = document.getElementById('user-id-json').textContent.trim();
+        window.CURRENT_USER_ID = raw ? JSON.parse(raw) : null;
+        console.log("CURRENT_USER_ID =", window.CURRENT_USER_ID);
+      </script>
