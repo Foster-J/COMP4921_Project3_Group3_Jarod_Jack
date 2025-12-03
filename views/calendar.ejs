@@ -7,6 +7,7 @@
       background: #dee2e6;
       border: 1px solid #dee2e6;
     }
+
     .calendar-day-header {
       background: #f8f9fa;
       padding: 0.5rem;
@@ -14,6 +15,7 @@
       font-weight: 600;
       border: 1px solid #dee2e6;
     }
+
     .calendar-day {
       background: white;
       min-height: 100px;
@@ -21,17 +23,21 @@
       position: relative;
       border: 1px solid #dee2e6;
     }
+
     .calendar-day.other-month {
       background: #f8f9fa;
       color: #6c757d;
     }
+
     .calendar-day.today {
       background: #e7f3ff;
     }
+
     .calendar-day-number {
       font-weight: 600;
       margin-bottom: 0.25rem;
     }
+
     .calendar-event {
       font-size: 0.75rem;
       padding: 2px 4px;
@@ -42,12 +48,14 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
     .week-view-container {
       display: grid;
       grid-template-columns: 80px repeat(7, 1fr);
       gap: 1px;
       background: #dee2e6;
     }
+
     .week-time-slot {
       background: #f8f9fa;
       padding: 0.5rem;
@@ -55,6 +63,7 @@
       border: 1px solid #dee2e6;
       font-size: 0.875rem;
     }
+
     .week-day-column {
       background: white;
       min-height: 60px;
@@ -62,6 +71,7 @@
       border: 1px solid #dee2e6;
       position: relative;
     }
+
     .week-event {
       padding: 4px;
       margin-bottom: 2px;
@@ -92,19 +102,22 @@
         <div class="btn-group" role="group">
           <input type="radio" class="btn-check" name="view" id="viewToday" value="today" checked>
           <label class="btn btn-outline-primary" for="viewToday">Today</label>
-          
+
           <input type="radio" class="btn-check" name="view" id="viewUpcoming" value="upcoming">
           <label class="btn btn-outline-primary" for="viewUpcoming">Upcoming</label>
-          
+
           <input type="radio" class="btn-check" name="view" id="viewWeek" value="week">
           <label class="btn btn-outline-primary" for="viewWeek">Week</label>
-          
+
           <input type="radio" class="btn-check" name="view" id="viewMonth" value="month">
           <label class="btn btn-outline-primary" for="viewMonth">Month</label>
         </div>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#eventModal" onclick="openCreateModal()">
           <i class="bi bi-plus-circle"></i> New Event
         </button>
+        <a href="/events/deleted" class="btn btn-outline-danger">
+          <i class="bi bi-trash"></i> Deleted Events
+        </a>
       </div>
     </div>
 
@@ -123,7 +136,7 @@
         <div class="modal-body">
           <form id="eventForm">
             <input type="hidden" id="eventId">
-            
+
             <div class="mb-3">
               <label for="eventTitle" class="form-label">Title <span class="text-danger">*</span></label>
               <input type="text" class="form-control" id="eventTitle" required>
@@ -147,14 +160,16 @@
             <div class="mb-3">
               <label for="eventColor" class="form-label">Color</label>
               <div class="d-flex gap-2 align-items-center">
-                <input type="color" class="form-control form-control-color" id="eventColor" value="#3b82f6" style="width: 60px;">
+                <input type="color" class="form-control form-control-color" id="eventColor" value="#3b82f6"
+                  style="width: 60px;">
                 <span class="text-muted">Choose an event color</span>
               </div>
             </div>
           </form>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-danger" id="deleteBtn" style="display: none;" onclick="deleteEvent()">Delete</button>
+          <button type="button" class="btn btn-danger" id="deleteBtn" style="display: none;"
+            onclick="deleteEvent()">Delete</button>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="btn btn-primary" onclick="saveEvent()">Save Event</button>
         </div>
@@ -228,8 +243,8 @@
     function renderCalendar() {
       updateDateDisplay();
       const container = document.getElementById('calendarContainer');
-      
-      switch(currentView) {
+
+      switch (currentView) {
         case 'today':
           container.innerHTML = renderTodayView();
           break;
@@ -337,7 +352,7 @@
         days.push(day);
       }
 
-      const hours = Array.from({length: 24}, (_, i) => i);
+      const hours = Array.from({ length: 24 }, (_, i) => i);
 
       return `
         <div class="week-view-container">
@@ -352,11 +367,11 @@
           ${hours.map(hour => `
             <div class="week-time-slot">${hour % 12 || 12}${hour < 12 ? 'am' : 'pm'}</div>
             ${days.map(day => {
-              const dayEvents = getEventsForDay(day).filter(event => {
-                const eventHour = new Date(event.start_datetime).getHours();
-                return eventHour === hour;
-              });
-              return `
+        const dayEvents = getEventsForDay(day).filter(event => {
+          const eventHour = new Date(event.start_datetime).getHours();
+          return eventHour === hour;
+        });
+        return `
                 <div class="week-day-column">
                   ${dayEvents.map(event => `
                     <div class="week-event" style="background-color: ${event.color}20; border-left: 3px solid ${event.color};" onclick="editEvent(${event.id})">
@@ -365,7 +380,7 @@
                   `).join('')}
                 </div>
               `;
-            }).join('')}
+      }).join('')}
           `).join('')}
         </div>
       `;
@@ -391,16 +406,16 @@
 
       return `
         <div class="calendar-grid">
-          ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => 
-            `<div class="calendar-day-header">${day}</div>`
-          ).join('')}
+          ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day =>
+        `<div class="calendar-day-header">${day}</div>`
+      ).join('')}
           
           ${days.map(day => {
-            const isCurrentMonth = day.getMonth() === month;
-            const isToday = day.getTime() === today.getTime();
-            const dayEvents = getEventsForDay(day);
-            
-            return `
+        const isCurrentMonth = day.getMonth() === month;
+        const isToday = day.getTime() === today.getTime();
+        const dayEvents = getEventsForDay(day);
+
+        return `
               <div class="calendar-day ${!isCurrentMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}">
                 <div class="calendar-day-number">${day.getDate()}</div>
                 ${dayEvents.slice(0, 3).map(event => `
@@ -411,7 +426,7 @@
                 ${dayEvents.length > 3 ? `<div class="text-muted small">+${dayEvents.length - 3} more</div>` : ''}
               </div>
             `;
-          }).join('')}
+      }).join('')}
         </div>
       `;
     }
@@ -433,8 +448,8 @@
         const eventStart = new Date(event.start_datetime);
         const eventEnd = new Date(event.end_datetime);
         return (eventStart >= dayStart && eventStart <= dayEnd) ||
-               (eventEnd >= dayStart && eventEnd <= dayEnd) ||
-               (eventStart <= dayStart && eventEnd >= dayEnd);
+          (eventEnd >= dayStart && eventEnd <= dayEnd) ||
+          (eventStart <= dayStart && eventEnd >= dayEnd);
       });
     }
 
@@ -543,5 +558,6 @@
       return div.innerHTML;
     }
   </script>
-</body>
-</html>
+  </body>
+
+  </html>
