@@ -258,8 +258,10 @@
       setupViewListeners();
       setupNavigationListeners();
       loadFriends();
-    });
-
+    });setInterval(() => {
+      loadEvents();
+    }, 5 * 1000);
+    
     function setupViewListeners() {
       document.querySelectorAll('input[name="view"]').forEach(radio => {
         radio.addEventListener('change', (e) => {
