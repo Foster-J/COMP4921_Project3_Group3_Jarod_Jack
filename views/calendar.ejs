@@ -49,6 +49,11 @@
       white-space: nowrap;
     }
 
+    .availability-results {
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
     .week-view-container {
       display: grid;
       grid-template-columns: 80px repeat(7, 1fr);
@@ -112,12 +117,22 @@
           <input type="radio" class="btn-check" name="view" id="viewMonth" value="month">
           <label class="btn btn-outline-primary" for="viewMonth">Month</label>
         </div>
+
+        <!-- New Event button -->
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#eventModal" onclick="openCreateModal()">
           <i class="bi bi-plus-circle"></i> New Event
         </button>
+
+
+        <!-- Deleted events / trash -->
         <a href="/events/deleted" class="btn btn-outline-danger">
           <i class="bi bi-trash"></i> Deleted Events
         </a>
+
+        <!-- Find common time with friends -->
+        <button type="button" class="btn btn-outline-success" onclick="openAvailabilityModal()">
+          <i class="bi bi-people"></i> Schedule With Friends
+        </button>
       </div>
     </div>
 
@@ -177,6 +192,53 @@
     </div>
   </div>
 
+  <!-- Find Common Time Modal -->
+  <div class="modal fade" id="availabilityModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Find Common Time</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-5">
+              <label class="form-label">Friends to include</label>
+              <div id="friendsList" class="border rounded p-2" style="max-height: 220px; overflow-y: auto;">
+                <p class="text-muted mb-0">Loading friends...</p>
+              </div>
+            </div>
+            <div class="col-md-7">
+              <div class="mb-3">
+                <label for="availabilityStart" class="form-label">Start date & time</label>
+                <input type="datetime-local" class="form-control" id="availabilityStart">
+              </div>
+              <div class="mb-3">
+                <label for="availabilityEnd" class="form-label">End date & time</label>
+                <input type="datetime-local" class="form-control" id="availabilityEnd">
+              </div>
+              <div class="mb-3">
+                <label for="slotMinutes" class="form-label">Slot length (minutes)</label>
+                <input type="number" class="form-control" id="slotMinutes" value="60" min="15" step="15">
+              </div>
+            </div>
+          </div>
+          <hr>
+          <div>
+            <h6>Available time slots</h6>
+            <div id="availabilityResults" class="availability-results">
+              <p class="text-muted mb-0">Choose friends and a date range, then click "Find Time".</p>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-success" onclick="findCommonTime()">Find Time</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     let currentEventId = null;
@@ -185,11 +247,17 @@
     let currentDate = new Date();
     const modal = new bootstrap.Modal(document.getElementById('eventModal'));
 
-    // Load events on page load
+    let availabilityModal = null;
+    let friendsList = [];
+    let invitedUserIdsForNextEvent = [];
+
     document.addEventListener('DOMContentLoaded', () => {
+      availabilityModal = new bootstrap.Modal(document.getElementById('availabilityModal'));
+
       loadEvents();
       setupViewListeners();
       setupNavigationListeners();
+      loadFriends();
     });
 
     function setupViewListeners() {
@@ -238,6 +306,42 @@
       } catch (error) {
         console.error('Error loading events:', error);
       }
+    }
+
+    async function loadFriends() {
+      try {
+        const res = await fetch('/api/friends/list');
+        if (!res.ok) {
+          console.error('Failed to load friends list');
+          return;
+        }
+        friendsList = await res.json();
+        renderFriendsList();
+      } catch (error) {
+        console.error('Error loading friends list:', error);
+      }
+    }
+
+    function renderFriendsList() {
+      const container = document.getElementById('friendsList');
+      if (!container) return;
+
+      if (!friendsList || friendsList.length === 0) {
+        container.innerHTML = '<p class="text-muted mb-0">You have no accepted friends to coordinate with.</p>';
+        return;
+      }
+
+      container.innerHTML = friendsList.map(friend => `
+        <div class="form-check">
+          <input class="form-check-input"
+                 type="checkbox"
+                 value="${friend.id}"
+                 id="friend-${friend.id}">
+          <label class="form-check-label" for="friend-${friend.id}">
+            ${escapeHtml(friend.username)}
+          </label>
+        </div>
+      `).join('');
     }
 
     function renderCalendar() {
@@ -453,8 +557,12 @@
       });
     }
 
-    function openCreateModal() {
+    function openCreateModal(fromAvailability = false) {
       currentEventId = null;
+      if (!fromAvailability) {
+        invitedUserIdsForNextEvent = [];
+      }
+
       document.getElementById('modalTitle').textContent = 'Create Event';
       document.getElementById('eventForm').reset();
       document.getElementById('eventColor').value = '#3b82f6';
@@ -497,6 +605,12 @@
 
       const eventData = { title, description, start_datetime: start, end_datetime: end, color };
 
+      if (!currentEventId &&
+        Array.isArray(invitedUserIdsForNextEvent) &&
+        invitedUserIdsForNextEvent.length > 0) {
+        eventData.invited_user_ids = invitedUserIdsForNextEvent;
+      }
+
       try {
         let response;
         if (currentEventId) {
@@ -527,14 +641,15 @@
 
     async function deleteEvent() {
       if (!currentEventId || !confirm('Are you sure you want to delete this event?')) return;
-
       try {
         const response = await fetch(`/api/events/${currentEventId}`, { method: 'DELETE' });
-        if (response.ok) {
+        const data = await response.json().catch(() => ({}));
+
+        if (response.ok && data.success) {
           modal.hide();
           loadEvents();
         } else {
-          alert('Failed to delete event');
+          alert(data.error || 'Failed to delete event');
         }
       } catch (error) {
         console.error('Error deleting event:', error);
@@ -556,6 +671,118 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    function openAvailabilityModal() {
+      const now = new Date();
+      const start = new Date(now);
+      start.setHours(9, 0, 0, 0);
+      const end = new Date(now);
+      end.setHours(17, 0, 0, 0);
+
+      const startInput = document.getElementById('availabilityStart');
+      const endInput = document.getElementById('availabilityEnd');
+      const slotInput = document.getElementById('slotMinutes');
+      const results = document.getElementById('availabilityResults');
+
+      startInput.value = formatDateTimeLocal(start.toISOString());
+      endInput.value = formatDateTimeLocal(end.toISOString());
+      slotInput.value = 60;
+      results.innerHTML = '<p class="text-muted mb-0">Click "Find Time" to see common free slots.</p>';
+
+      availabilityModal.show();
+    }
+
+    async function findCommonTime() {
+      const start = document.getElementById('availabilityStart').value;
+      const end = document.getElementById('availabilityEnd').value;
+      const slotMinutes = parseInt(document.getElementById('slotMinutes').value, 10) || 60;
+      const resultsContainer = document.getElementById('availabilityResults');
+
+      const selectedFriendIds = Array.from(
+        document.querySelectorAll('#friendsList input[type="checkbox"]:checked')
+      ).map(cb => Number(cb.value));
+
+      if (!start || !end) {
+        alert('Please select start and end date/time');
+        return;
+      }
+
+      if (selectedFriendIds.length === 0) {
+        alert('Please select at least one friend to coordinate with');
+        return;
+      }
+
+      // Remember these friends for when we create the event
+      invitedUserIdsForNextEvent = selectedFriendIds.slice();
+
+
+      if (new Date(start) >= new Date(end)) {
+        alert('End time must be after start time');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/schedule/availability', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_ids: selectedFriendIds,
+            start_datetime: start,
+            end_datetime: end,
+            slot_minutes: slotMinutes
+          })
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          alert(data.error || 'Failed to find availability');
+          return;
+        }
+
+        const slots = data.slots || [];
+
+        if (!slots.length) {
+          resultsContainer.innerHTML = '<div class="alert alert-warning mb-0">No common free slots found in this range.</div>';
+          return;
+        }
+
+        resultsContainer.innerHTML = `
+          <div class="list-group">
+            ${slots.map(slot => {
+          const startD = new Date(slot.start);
+          const endD = new Date(slot.end);
+          return `
+                <button type="button"
+                        class="list-group-item list-group-item-action availability-slot"
+                        data-start="${slot.start}"
+                        data-end="${slot.end}">
+                  ${startD.toLocaleString()} &mdash; ${endD.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                </button>
+              `;
+        }).join('')}
+          </div>
+          <p class="text-muted small mt-2 mb-0">Click a slot to create an event at that time.</p>
+        `;
+
+        document.querySelectorAll('.availability-slot').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const s = btn.getAttribute('data-start');
+            const e = btn.getAttribute('data-end');
+
+            availabilityModal.hide();
+            openCreateModal(true);
+            document.getElementById('eventStart').value = formatDateTimeLocal(s);
+            document.getElementById('eventEnd').value = formatDateTimeLocal(e);
+            modal.show();
+
+          });
+        });
+      } catch (err) {
+        console.error('Error finding availability:', err);
+        resultsContainer.innerHTML = '<div class="alert alert-danger mb-0">Error while finding availability.</div>';
+      }
     }
   </script>
   </body>
