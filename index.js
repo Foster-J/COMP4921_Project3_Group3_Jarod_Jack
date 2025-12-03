@@ -161,6 +161,40 @@ async function ensureEventParticipantsTable() {
   }
 }
 
+// Ensure activity_events table exists
+async function ensureActivityEventsTable() {
+  const createSQL = `
+    CREATE TABLE IF NOT EXISTS activity_events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      actor_id INT NOT NULL,
+      type ENUM(
+        'event_created',
+        'event_deleted',
+        'event_restored',
+        'friend_request_accepted',
+        'friend_removed'
+      ) NOT NULL,
+      target_user_id INT DEFAULT NULL,
+      event_id INT DEFAULT NULL,
+      event_title VARCHAR(255) DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE SET NULL,
+      INDEX idx_actor (actor_id),
+      INDEX idx_target (target_user_id),
+      INDEX idx_event (event_id),
+      INDEX idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `;
+  try {
+    await database.query(createSQL);
+    console.log("Activity events table is ready!");
+  } catch (err) {
+    console.error("Error ensuring activity_events table:", err);
+  }
+}
+
 // Permanently remove events that were deleted more than 30 days ago
 async function purgeOldDeletedEvents() {
   try {
@@ -177,6 +211,7 @@ ensureUsersTable();
 ensureCalendarEventsTable();
 ensureFriendshipsTable();
 ensureEventParticipantsTable();
+ensureActivityEventsTable();
 purgeOldDeletedEvents();
 
 function ensureLoggedIn(req, res, next) {
@@ -197,6 +232,18 @@ async function getUserId(req) {
   if (!rows || rows.length === 0) return null;
   req.session.userId = rows[0].id;
   return rows[0].id;
+}
+
+async function logActivity(actorId, type, { targetUserId = null, eventId = null, eventTitle = null } = {}) {
+  try {
+    await database.query(
+      `INSERT INTO activity_events (actor_id, type, target_user_id, event_id, event_title)
+       VALUES (?, ?, ?, ?, ?)`,
+      [actorId, type, targetUserId, eventId, eventTitle]
+    );
+  } catch (err) {
+    console.error("Error logging activity:", err);
+  }
 }
 
 async function getFriendIds(userId) {
@@ -286,6 +333,11 @@ app.post("/api/events", ensureLoggedIn, async (req, res) => {
 
     const eventId = result.insertId;
 
+    await logActivity(userId, 'event_created', {
+      eventId,
+      eventTitle: title
+    });
+
     // Always add owner as participant
     try {
       await database.query(
@@ -322,7 +374,6 @@ app.post("/api/events", ensureLoggedIn, async (req, res) => {
     res.status(500).json({ error: "Failed to create event" });
   }
 });
-
 
 
 // Update event
@@ -365,9 +416,8 @@ app.delete("/api/events/:id", ensureLoggedIn, async (req, res) => {
     const userId = await getUserId(req);
     const eventId = req.params.id;
 
-    // Get event + owner info
     const [rows] = await database.query(
-      `SELECT ce.id, ce.user_id, u.username AS owner_username
+      `SELECT ce.id, ce.user_id, ce.title, u.username AS owner_username
        FROM calendar_events ce
        INNER JOIN users u ON ce.user_id = u.id
        WHERE ce.id = ? AND ce.deleted_at IS NULL`,
@@ -386,7 +436,6 @@ app.delete("/api/events/:id", ensureLoggedIn, async (req, res) => {
       });
     }
 
-    // Owner: perform soft delete
     const [result] = await database.query(
       "UPDATE calendar_events SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL",
       [eventId]
@@ -396,12 +445,18 @@ app.delete("/api/events/:id", ensureLoggedIn, async (req, res) => {
       return res.status(404).json({ error: "Event not found or already deleted" });
     }
 
+    await logActivity(userId, 'event_deleted', {
+      eventId,
+      eventTitle: event.title
+    });
+
     res.json({ success: true });
   } catch (err) {
     console.error("Error deleting event:", err);
     res.status(500).json({ error: "Failed to delete event" });
   }
 });
+
 
 // Trash page 
 app.get("/events/deleted", ensureLoggedIn, async (req, res) => {
@@ -429,7 +484,7 @@ app.post("/api/events/:id/restore", ensureLoggedIn, async (req, res) => {
     const eventId = req.params.id;
 
     const [rows] = await database.query(
-      "SELECT deleted_at FROM calendar_events WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL",
+      "SELECT title, deleted_at FROM calendar_events WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL",
       [eventId, userId]
     );
 
@@ -439,7 +494,7 @@ app.post("/api/events/:id/restore", ensureLoggedIn, async (req, res) => {
 
     const deletedAt = new Date(rows[0].deleted_at);
     const limit = new Date();
-    limit.setDate(limit.getDate() - 30); // 30 days ago
+    limit.setDate(limit.getDate() - 30); 
 
     if (deletedAt < limit) {
       return res.status(400).json({ error: "Event is too old to restore (older than 30 days)" });
@@ -449,6 +504,11 @@ app.post("/api/events/:id/restore", ensureLoggedIn, async (req, res) => {
       "UPDATE calendar_events SET deleted_at = NULL WHERE id = ? AND user_id = ?",
       [eventId, userId]
     );
+
+    await logActivity(userId, 'event_restored', {
+      eventId,
+      eventTitle: rows[0].title
+    });
 
     res.json({ success: true });
   } catch (err) {
@@ -610,9 +670,8 @@ app.post("/api/friends/accept/:id", ensureLoggedIn, async (req, res) => {
     const userId = await getUserId(req);
     const friendshipId = req.params.id;
 
-    // Verify this request is for the current user
     const [friendship] = await database.query(
-      "SELECT id FROM friendships WHERE id = ? AND addressee_id = ? AND status = 'pending'",
+      "SELECT id, requester_id FROM friendships WHERE id = ? AND addressee_id = ? AND status = 'pending'",
       [friendshipId, userId]
     );
 
@@ -620,15 +679,123 @@ app.post("/api/friends/accept/:id", ensureLoggedIn, async (req, res) => {
       return res.status(404).json({ error: "Friend request not found" });
     }
 
+    const requesterId = friendship[0].requester_id;
+
     await database.query(
       "UPDATE friendships SET status = 'accepted' WHERE id = ?",
       [friendshipId]
     );
 
+    await logActivity(userId, 'friend_request_accepted', {
+      targetUserId: requesterId
+    });
+
     res.json({ success: true });
   } catch (err) {
     console.error("Error accepting friend request:", err);
     res.status(500).json({ error: "Failed to accept friend request" });
+  }
+});
+
+// Activity feed page
+app.get("/activity", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const friendIds = await getFriendIds(userId);
+
+    const ids = [userId, ...friendIds];
+    let activities = [];
+
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => "?").join(", ");
+
+      const [rows] = await database.query(
+        `
+        SELECT 
+          ae.*,
+          actor.username AS actor_username,
+          target.username AS target_username
+        FROM activity_events ae
+        JOIN users actor ON ae.actor_id = actor.id
+        LEFT JOIN users target ON ae.target_user_id = target.id
+        WHERE ae.actor_id IN (${placeholders})
+           OR (ae.target_user_id IS NOT NULL AND ae.target_user_id IN (${placeholders}))
+        ORDER BY ae.created_at DESC
+        LIMIT 50
+        `,
+        [...ids, ...ids]
+      );
+
+      activities = rows;
+    }
+
+    await database.query(
+      "UPDATE users SET last_seen_activity_at = NOW() WHERE id = ?",
+      [userId]
+    );
+
+    res.render("activity", { activities, currentUserId: userId });
+  } catch (err) {
+    console.error("Error loading activity feed:", err);
+    res.redirect("/");
+  }
+});
+
+
+// Activity feed as JSON (for polling / badges)
+app.get("/api/activity", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const friendIds = await getFriendIds(userId);
+
+    const ids = [userId, ...friendIds];
+    let activities = [];
+
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => "?").join(", ");
+
+      const [rows] = await database.query(
+        `
+        SELECT 
+          ae.*,
+          actor.username AS actor_username,
+          target.username AS target_username
+        FROM activity_events ae
+        JOIN users actor ON ae.actor_id = actor.id
+        LEFT JOIN users target ON ae.target_user_id = target.id
+        WHERE ae.actor_id IN (${placeholders})
+           OR (ae.target_user_id IS NOT NULL AND ae.target_user_id IN (${placeholders}))
+        ORDER BY ae.created_at DESC
+        LIMIT 50
+        `,
+        [...ids, ...ids]
+      );
+
+      activities = rows;
+    }
+
+    const [[userRow]] = await database.query(
+      "SELECT last_seen_activity_at FROM users WHERE id = ?",
+      [userId]
+    );
+
+    let unreadCount = 0;
+
+    if (!userRow || !userRow.last_seen_activity_at) {
+      unreadCount = activities.length;
+    } else {
+      const lastSeen = new Date(userRow.last_seen_activity_at);
+      unreadCount = activities.filter(a => new Date(a.created_at) > lastSeen).length;
+    }
+
+    res.json({
+      currentUserId: userId,
+      activities,
+      unreadCount
+    });
+  } catch (err) {
+    console.error("Error loading activity feed (JSON):", err);
+    res.status(500).json({ error: "Failed to load activity feed" });
   }
 });
 
@@ -664,7 +831,7 @@ app.post("/api/friends/reject/:id", ensureLoggedIn, async (req, res) => {
 app.delete("/api/friends/:id", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
-    const friendId = req.params.id;
+    const friendId = Number(req.params.id);
 
     const [result] = await database.query(
       `DELETE FROM friendships 
@@ -677,6 +844,10 @@ app.delete("/api/friends/:id", ensureLoggedIn, async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "Friendship not found" });
     }
+
+    await logActivity(userId, 'friend_removed', {
+      targetUserId: friendId
+    });
 
     res.json({ success: true });
   } catch (err) {

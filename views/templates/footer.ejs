@@ -6,6 +6,37 @@
 <script type="text/javascript">
   $.cloudinary.config({ cloud_name: '<%= process.env.CLOUDINARY_CLOUD_NAME %>', secure: true });
 </script>
+<script>
+  async function refreshActivityBadge() {
+    try {
+      const badge = document.getElementById('activity-badge');
+      if (!badge) return; 
+
+      const res = await fetch('/api/activity');
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const count = typeof data.unreadCount === 'number'
+        ? data.unreadCount
+        : (data.activities || []).length;
+
+      if (count > 0) {
+        badge.textContent = count;
+        badge.classList.remove('d-none');
+      } else {
+        badge.classList.add('d-none');
+      }
+    } catch (e) {
+      console.error('Error refreshing activity badge:', e);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    refreshActivityBadge();
+    setInterval(refreshActivityBadge, 5000); 
+  });
+</script>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

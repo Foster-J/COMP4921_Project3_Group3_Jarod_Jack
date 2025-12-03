@@ -1,0 +1,266 @@
+<%- include('templates/header', { title: 'Activity Feed', loggedIn }) %>
+
+<main class="container py-4">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h4 mb-0">
+      <i class="fa-solid fa-bell me-2"></i>Friend Activity
+    </h1>
+
+    <a href="/" class="btn btn-outline-secondary btn-sm">
+      <i class="fa-solid fa-calendar-days me-1"></i> Back to Calendar
+    </a>
+  </div>
+
+  <!-- Empty-state alert -->
+  <div id="no-activity-alert"
+       class="alert alert-info <%= activities && activities.length ? 'd-none' : '' %>">
+    No recent activity yet. Create events, add friends, or accept friend requests to see updates here.
+  </div>
+
+  <!-- Activity list -->
+  <ul id="activity-list"
+      class="list-group shadow-sm <%= !activities || !activities.length ? 'd-none' : '' %>">
+    <% if (activities && activities.length) { %>
+      <% activities.forEach(a => { %>
+        <li class="list-group-item d-flex justify-content-between align-items-start">
+          <div class="d-flex">
+
+            <div class="me-3">
+              <% if (a.type === 'event_created') { %>
+                <i class="fa-solid fa-calendar-plus fa-lg text-success"></i>
+              <% } else if (a.type === 'event_deleted') { %>
+                <i class="fa-solid fa-calendar-xmark fa-lg text-danger"></i>
+              <% } else if (a.type === 'event_restored') { %>
+                <i class="fa-solid fa-rotate-left fa-lg text-warning"></i>
+              <% } else if (a.type === 'friend_request_accepted') { %>
+                <i class="fa-solid fa-user-group fa-lg text-primary"></i>
+              <% } else if (a.type === 'friend_removed') { %>
+                <i class="fa-solid fa-user-minus fa-lg text-danger"></i>
+              <% } else { %>
+                <i class="fa-solid fa-circle-info fa-lg text-secondary"></i>
+              <% } %>
+            </div>
+
+            <div>
+              <div class="fw-semibold">
+                <% if (a.type === 'event_created') { %>
+
+                  <% if (a.actor_id === currentUserId) { %>
+                    You created a new event
+                  <% } else { %>
+                    <%= a.actor_username %> created a new event
+                  <% } %>
+                  "<%= a.event_title || "Untitled event" %>"
+
+                <% } else if (a.type === 'event_deleted') { %>
+
+                  <% if (a.actor_id === currentUserId) { %>
+                    You deleted an event
+                  <% } else { %>
+                    <%= a.actor_username %> deleted an event
+                  <% } %>
+                  "<%= a.event_title || "Untitled event" %>"
+
+                <% } else if (a.type === 'event_restored') { %>
+
+                  <% if (a.actor_id === currentUserId) { %>
+                    You restored an event
+                  <% } else { %>
+                    <%= a.actor_username %> restored an event
+                  <% } %>
+                  "<%= a.event_title || "Untitled event" %>"
+
+                <% } else if (a.type === 'friend_request_accepted') { %>
+
+                  <% const isActor = (a.actor_id === currentUserId); %>
+                  <% const isTarget = (a.target_user_id === currentUserId); %>
+
+                  <% if (isActor || isTarget) { %>
+                    You and <%= isActor ? a.target_username : a.actor_username %> are now friends
+                  <% } else { %>
+                    <%= a.actor_username %> and <%= a.target_username %> are now friends
+                  <% } %>
+
+                <% } else if (a.type === 'friend_removed') { %>
+
+                  <% const isActor2 = (a.actor_id === currentUserId); %>
+                  <% const isTarget2 = (a.target_user_id === currentUserId); %>
+
+                  <% if (isActor2) { %>
+                    You removed <%= a.target_username %> from your friends
+                  <% } else if (isTarget2) { %>
+                    <%= a.actor_username %> removed you from their friends
+                  <% } else { %>
+                    <%= a.actor_username %> and <%= a.target_username %> are no longer friends
+                  <% } %>
+
+                <% } else { %>
+                  Activity
+                <% } %>
+              </div>
+
+              <small class="text-muted">
+                <%= new Date(a.created_at).toLocaleString() %>
+              </small>
+            </div>
+          </div>
+        </li>
+      <% }) %>
+    <% } %>
+  </ul>
+
+</main>
+
+<script>
+  const CURRENT_USER_ID = <%- JSON.stringify(currentUserId) %>;
+
+  async function refreshActivity() {
+    try {
+      const res = await fetch('/api/activity');
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const activities = data.activities || [];
+      const currentUserId = data.currentUserId ?? CURRENT_USER_ID;
+      const unreadCount = typeof data.unreadCount === 'number'
+        ? data.unreadCount
+        : activities.length;
+
+      const list = document.getElementById('activity-list');
+      const emptyAlert = document.getElementById('no-activity-alert');
+      const badge = document.getElementById('activity-badge');
+
+      if (!list) return;
+
+      if (badge) {
+        if (unreadCount > 0) {
+          badge.textContent = unreadCount;
+          badge.classList.remove('d-none');
+        } else {
+          badge.classList.add('d-none');
+        }
+      }
+
+      if (activities.length === 0) {
+        list.classList.add('d-none');
+        if (emptyAlert) emptyAlert.classList.remove('d-none');
+        list.innerHTML = '';
+        return;
+      } else {
+        list.classList.remove('d-none');
+        if (emptyAlert) emptyAlert.classList.add('d-none');
+      }
+
+      list.innerHTML = '';
+
+      activities.forEach(a => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-start';
+
+        const outerDiv = document.createElement('div');
+        outerDiv.className = 'd-flex';
+
+        const iconWrapper = document.createElement('div');
+        iconWrapper.className = 'me-3';
+
+        const icon = document.createElement('i');
+        icon.classList.add('fa-lg');
+
+        if (a.type === 'event_created') {
+          icon.classList.add('fa-solid', 'fa-calendar-plus', 'text-success');
+        } else if (a.type === 'event_deleted') {
+          icon.classList.add('fa-solid', 'fa-calendar-xmark', 'text-danger');
+        } else if (a.type === 'event_restored') {
+          icon.classList.add('fa-solid', 'fa-rotate-left', 'text-warning');
+        } else if (a.type === 'friend_request_accepted') {
+          icon.classList.add('fa-solid', 'fa-user-group', 'text-primary');
+        } else if (a.type === 'friend_removed') {
+          icon.classList.add('fa-solid', 'fa-user-minus', 'text-danger');
+        } else {
+          icon.classList.add('fa-solid', 'fa-circle-info', 'text-secondary');
+        }
+
+        iconWrapper.appendChild(icon);
+
+        const textWrapper = document.createElement('div');
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'fw-semibold';
+
+        const eventTitle = a.event_title || 'Untitled event';
+        let message = '';
+
+        if (a.type === 'event_created') {
+          if (a.actor_id === currentUserId) {
+            message = `You created a new event "${eventTitle}"`;
+          } else {
+            message = `${a.actor_username} created a new event "${eventTitle}"`;
+          }
+
+        } else if (a.type === 'event_deleted') {
+          if (a.actor_id === currentUserId) {
+            message = `You deleted an event "${eventTitle}"`;
+          } else {
+            message = `${a.actor_username} deleted an event "${eventTitle}"`;
+          }
+
+        } else if (a.type === 'event_restored') {
+          if (a.actor_id === currentUserId) {
+            message = `You restored an event "${eventTitle}"`;
+          } else {
+            message = `${a.actor_username} restored an event "${eventTitle}"`;
+          }
+
+        } else if (a.type === 'friend_request_accepted') {
+          const isActor = (a.actor_id === currentUserId);
+          const isTarget = (a.target_user_id === currentUserId);
+
+          if (isActor || isTarget) {
+            const otherName = isActor ? a.target_username : a.actor_username;
+            message = `You and ${otherName} are now friends`;
+          } else {
+            message = `${a.actor_username} and ${a.target_username} are now friends`;
+          }
+
+        } else if (a.type === 'friend_removed') {
+          const isActor2 = (a.actor_id === currentUserId);
+          const isTarget2 = (a.target_user_id === currentUserId);
+
+          if (isActor2) {
+            message = `You removed ${a.target_username} from your friends`;
+          } else if (isTarget2) {
+            message = `${a.actor_username} removed you from their friends`;
+          } else {
+            message = `${a.actor_username} and ${a.target_username} are no longer friends`;
+          }
+
+        } else {
+          message = 'Activity';
+        }
+
+        titleDiv.textContent = message;
+
+        const timeSmall = document.createElement('small');
+        timeSmall.className = 'text-muted';
+        timeSmall.textContent = new Date(a.created_at).toLocaleString();
+
+        textWrapper.appendChild(titleDiv);
+        textWrapper.appendChild(timeSmall);
+
+        outerDiv.appendChild(iconWrapper);
+        outerDiv.appendChild(textWrapper);
+        li.appendChild(outerDiv);
+        list.appendChild(li);
+      });
+    } catch (e) {
+      console.error('Error refreshing activity:', e);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    refreshActivity();
+    setInterval(refreshActivity, 5000); 
+  });
+</script>
+
+<%- include('templates/footer') %>
