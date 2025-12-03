@@ -94,11 +94,13 @@ async function ensureCalendarEventsTable() {
       start_datetime DATETIME NOT NULL,
       end_datetime DATETIME NOT NULL,
       color VARCHAR(7) DEFAULT '#3b82f6',
+      deleted_at DATETIME NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       INDEX idx_user_id (user_id),
-      INDEX idx_start_datetime (start_datetime)
+      INDEX idx_start_datetime (start_datetime),
+      INDEX idx_deleted_at (deleted_at)
     );
   `;
   try {
@@ -135,9 +137,22 @@ async function ensureFriendshipsTable() {
   }
 }
 
+// Permanently remove events that were deleted more than 30 days ago
+async function purgeOldDeletedEvents() {
+  try {
+    await database.query(
+      "DELETE FROM calendar_events WHERE deleted_at IS NOT NULL AND deleted_at < (NOW() - INTERVAL 30 DAY)"
+    );
+    console.log("Old soft-deleted events purged (older than 30 days).");
+  } catch (err) {
+    console.error("Error purging old deleted events:", err);
+  }
+}
+
 ensureUsersTable();
 ensureCalendarEventsTable();
 ensureFriendshipsTable();
+purgeOldDeletedEvents();
 
 function ensureLoggedIn(req, res, next) {
   if (!req.session.authenticated) return res.redirect("/login");
@@ -163,7 +178,7 @@ app.get("/", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
     const [events] = await database.query(
-      "SELECT * FROM calendar_events WHERE user_id = ? ORDER BY start_datetime ASC",
+      "SELECT * FROM calendar_events WHERE user_id = ? AND deleted_at IS NULL ORDER BY start_datetime ASC",
       [userId]
     );
     res.render("calendar", { events });
@@ -178,7 +193,7 @@ app.get("/api/events", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
     const [events] = await database.query(
-      "SELECT * FROM calendar_events WHERE user_id = ? ORDER BY start_datetime ASC",
+      "SELECT * FROM calendar_events WHERE user_id = ? AND deleted_at IS NULL ORDER BY start_datetime ASC",
       [userId]
     );
     res.json(events);
@@ -224,7 +239,7 @@ app.put("/api/events/:id", ensureLoggedIn, async (req, res) => {
 
     // Check if event belongs to user
     const [existing] = await database.query(
-      "SELECT id FROM calendar_events WHERE id = ? AND user_id = ?",
+      "SELECT id FROM calendar_events WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
       [eventId, userId]
     );
 
@@ -249,14 +264,14 @@ app.put("/api/events/:id", ensureLoggedIn, async (req, res) => {
   }
 });
 
-// Delete event
+// Soft delete event
 app.delete("/api/events/:id", ensureLoggedIn, async (req, res) => {
   try {
     const userId = await getUserId(req);
     const eventId = req.params.id;
 
     const [result] = await database.query(
-      "DELETE FROM calendar_events WHERE id = ? AND user_id = ?",
+      "UPDATE calendar_events SET deleted_at = NOW() WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
       [eventId, userId]
     );
 
@@ -268,6 +283,102 @@ app.delete("/api/events/:id", ensureLoggedIn, async (req, res) => {
   } catch (err) {
     console.error("Error deleting event:", err);
     res.status(500).json({ error: "Failed to delete event" });
+  }
+});
+
+// Trash page 
+app.get("/events/deleted", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+
+    await purgeOldDeletedEvents();
+
+    const [deletedEvents] = await database.query(
+      "SELECT * FROM calendar_events WHERE user_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+      [userId]
+    );
+
+    res.render("deletedEvents", { events: deletedEvents });
+  } catch (err) {
+    console.error("Error loading deleted events:", err);
+    res.redirect("/");
+  }
+});
+
+// Restore a soft-deleted event, only if deleted less than 30 days ago
+app.post("/api/events/:id/restore", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const eventId = req.params.id;
+
+    const [rows] = await database.query(
+      "SELECT deleted_at FROM calendar_events WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL",
+      [eventId, userId]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "Deleted event not found" });
+    }
+
+    const deletedAt = new Date(rows[0].deleted_at);
+    const limit = new Date();
+    limit.setDate(limit.getDate() - 30); // 30 days ago
+
+    if (deletedAt < limit) {
+      return res.status(400).json({ error: "Event is too old to restore (older than 30 days)" });
+    }
+
+    await database.query(
+      "UPDATE calendar_events SET deleted_at = NULL WHERE id = ? AND user_id = ?",
+      [eventId, userId]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error restoring event:", err);
+    res.status(500).json({ error: "Failed to restore event" });
+  }
+});
+
+// Permanently delete a soft-deleted event if it's older than 30 days
+app.delete("/api/events/:id/delete-forever", ensureLoggedIn, async (req, res) => {
+  try {
+    const userId = await getUserId(req);
+    const eventId = req.params.id;
+
+    const [result] = await database.query(
+      `
+      DELETE FROM calendar_events
+      WHERE id = ?
+        AND user_id = ?
+        AND deleted_at IS NOT NULL
+        AND deleted_at < (NOW() - INTERVAL 30 DAY)
+      `,
+      [eventId, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(400).json({
+        error: "Event cannot be permanently deleted yet. It must have been deleted for at least 30 days."
+      });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error permanently deleting event:", err);
+    res.status(500).json({ error: "Failed to permanently delete event" });
+  }
+});
+
+
+// Explicitly purge old deleted events (older than 30 days)
+app.post("/api/events/purge-old", ensureLoggedIn, async (req, res) => {
+  try {
+    await purgeOldDeletedEvents();
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error purging old events:", err);
+    res.status(500).json({ error: "Failed to purge old events" });
   }
 });
 
