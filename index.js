@@ -84,12 +84,27 @@ async function ensureUsersTable() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       username VARCHAR(255) UNIQUE NOT NULL,
       password VARCHAR(255) NOT NULL,
+      profile_picture VARCHAR(500),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `;
   try {
     await database.query(createSQL);
     console.log("Users table is ready!");
+    
+    // Add profile_picture column if it doesn't exist (for existing tables)
+    try {
+      await database.query(`
+        ALTER TABLE users 
+        ADD COLUMN profile_picture VARCHAR(500) AFTER password
+      `);
+      console.log("Added profile_picture column to users table");
+    } catch (err) {
+      // Column already exists, ignore error
+      if (err.code !== 'ER_DUP_FIELDNAME') {
+        console.log("profile_picture column already exists or other error:", err.code);
+      }
+    }
   } catch (err) {
     console.error("Error ensuring users table:", err);
   }
